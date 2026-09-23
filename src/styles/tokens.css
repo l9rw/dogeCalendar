@@ -15,15 +15,51 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button { font: inherit; }
 
 .calendar-shell {
-  width: min(100%, 664px);
+  width: min(100%, 1080px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 7px 8px 8px;
+  padding: 34px;
   background: #fff;
   border: 1px solid #d9e8ff;
   border-radius: 16px;
   box-shadow: 0 4px 16px rgba(83, 125, 201, .04);
 }
+
+.taskbar-context-menu { position: absolute; z-index: 10; inset: 0; display: grid; align-content: center; min-width: 150px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: var(--shadow); }
+.taskbar-context-menu button { padding: 9px 12px; border: 0; border-radius: 8px; color: #171717; background: transparent; text-align: left; cursor: pointer; }
+.taskbar-context-menu button:hover { color: var(--blue); background: #edf0ff; }
+.settings-panel { position: absolute; z-index: 9; inset: 0; padding: 34px; border-radius: inherit; background: var(--surface); }
+.settings-header { display: flex; align-items: flex-start; justify-content: space-between; }
+.settings-header h2 { margin: 0; color: var(--text); }
+.settings-close { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-soft); font-size: 22px; cursor: pointer; }
+.settings-description { color: var(--muted); font-size: 13px; }
+
+.calendar-layout { display: grid; grid-template-columns: 285px minmax(0, 1fr); gap: 38px; align-items: start; }
+.detail-panel { min-height: 560px; padding: 27px 25px 22px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(160deg, #fff, #f7f7f9); box-shadow: 0 14px 32px rgba(44, 59, 78, .07); }
+.detail-topline { display: flex; align-items: center; justify-content: space-between; }
+.detail-caption, .section-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.today-badge { padding: 5px 9px; border-radius: 999px; color: var(--blue); background: #edf0ff; font-size: 11px; font-weight: 700; }
+.detail-date { display: flex; align-items: end; gap: 16px; margin-top: 35px; }
+.detail-day { color: var(--blue); font-size: 76px; font-weight: 300; line-height: .86; letter-spacing: -.09em; }
+.detail-date div { display: grid; gap: 8px; padding-bottom: 3px; }
+.detail-date strong { color: #171717; font-size: 16px; font-weight: 700; }
+.detail-date span { color: var(--muted); font-size: 13px; }
+.detail-lunar { display: flex; align-items: center; gap: 10px; margin-top: 22px; color: #171717; font-size: 14px; }
+.detail-lunar span:last-child { color: var(--muted); font-size: 12px; }
+.detail-divider { height: 1px; margin: 27px 0 23px; background: var(--line); }
+.detail-section { display: grid; gap: 9px; margin-bottom: 22px; }
+.detail-section p { margin: 0; color: #171717; font-size: 13px; line-height: 1.7; }
+.detail-section-muted p { color: var(--muted); }
+.detail-today { width: 100%; margin-top: 19px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--blue); background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
+.side-holiday-card { margin-top: 22px; overflow: hidden; border-radius: 13px; background: #f7f7f9; color: #4c4c4c; }
+.side-holiday-card .footer-links { padding: 10px 12px 3px; }
+.side-holiday-card .holiday-summary { display: block; min-height: auto; padding: 8px 12px; }
+.side-holiday-card .holiday-date { min-width: 0; margin-bottom: 8px; }
+.side-holiday-card .holiday-date strong { font-size: 16px; }
+.side-holiday-card .holiday-date b { font-size: 12px; }
+.side-holiday-card .holiday-lines { border-left: 0; border-top: 1px solid #dddde0; padding: 7px 0 0; }
+.side-holiday-card .holiday-lines p { white-space: normal; line-height: 1.5; }
+.side-holiday-card .countdown { padding: 8px 12px 10px; line-height: 1.5; }
 
 .calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 58px; padding: 9px 7px 7px; }
 .select-control, .today-button { height: 36px; border: 1px solid #d9dce3; border-radius: 9px; color: #202020; background: #fff; font-size: 14px; cursor: pointer; }
@@ -51,6 +87,7 @@ button { font: inherit; }
 .solar-day, .lunar-day, .solar-term { position: relative; z-index: 1; display: block; text-align: center; }
 .solar-day { font-size: 22px; font-weight: 500; line-height: 26px; }
 .lunar-day { margin-top: 1px; color: #313131; font-size: 12px; }
+.lunar-day.special-day { color: var(--red); }
 .muted .lunar-day { color: #c9c9c9; }
 .solar-term { color: var(--red); font-size: 11px; }
 .rest-mark, .work-mark { position: absolute; z-index: 2; top: -3px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; color: #fff; background: var(--red); font-size: 10px; font-weight: 600; }
@@ -80,6 +117,13 @@ button { font: inherit; }
 .mini-month-grid .today { color: #fff; background: var(--blue); }
 
 @media (max-width: 560px) {
+  .calendar-shell { padding: 20px 12px 14px; }
+  .calendar-layout { grid-template-columns: 1fr; gap: 22px; }
+  .detail-panel { min-height: auto; padding: 22px; }
+  .detail-date { margin-top: 25px; }
+  .detail-section, .detail-divider { display: none; }
+  .side-holiday-card { max-width: 420px; }
+  .detail-today { width: auto; margin-top: 23px; padding-inline: 20px; }
   .calendar-header { gap: 5px; padding-inline: 1px; }
   .select-season { width: 82px; }
   .select-year { width: 88px; }
@@ -90,4 +134,16 @@ button { font: inherit; }
   .solar-day { font-size: 20px; }
   .holiday-lines p { font-size: 10px; }
   .holiday-date { min-width: 100px; }
+}
+
+@media (min-width: 561px) and (max-width: 850px) {
+  .calendar-shell { padding: 24px 16px 18px; }
+  .calendar-layout { grid-template-columns: 230px minmax(0, 1fr); gap: 20px; }
+  .detail-panel { padding: 22px 18px; }
+  .detail-day { font-size: 64px; }
+  .calendar-header { gap: 5px; padding-inline: 1px; }
+  .select-season { width: 78px; }
+  .select-year { width: 83px; }
+  .month-control .select-control { width: 70px; }
+  .today-button { width: 70px; }
 }

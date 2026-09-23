@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCalendarMeta } from "./services/calendarData";
 
 type CalendarDay = {
@@ -50,6 +52,8 @@ export function App() {
   const [cursor, setCursor] = useState(new Date(2026, 8, 1));
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
+  const [contextMenu, setContextMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
 
   const moveMonth = (offset: number) => {
@@ -68,9 +72,65 @@ export function App() {
   const selectedKey = selected.toDateString();
   const selectedMeta = getCalendarMeta(selected);
 
+  useEffect(() => {
+    const disposers: Array<() => void> = [];
+    listen("taskbar-calendar-click", () => {
+      setContextMenu(false);
+      setShowSettings(false);
+    }).then((dispose) => disposers.push(dispose));
+    listen("taskbar-calendar-context", () => {
+      setContextMenu(true);
+      setShowSettings(false);
+    }).then((dispose) => disposers.push(dispose));
+    return () => disposers.forEach((dispose) => dispose());
+  }, []);
+  const selectedIsToday = selectedKey === now.toDateString();
+
   return (
     <main className="calendar-shell">
-      <section className="calendar-area" aria-label="月视图">
+      {contextMenu ? (
+        <div className="taskbar-context-menu" role="menu">
+          <button role="menuitem" onClick={() => setContextMenu(false)}>打开日历</button>
+          <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>设置</button>
+          <button role="menuitem" onClick={() => invoke("quit_app")}>退出</button>
+        </div>
+      ) : showSettings ? (
+        <section className="settings-panel" aria-label="设置">
+          <div className="settings-header">
+            <div><p className="eyebrow">CALENDAR SETTINGS</p><h2>设置</h2></div>
+            <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
+          </div>
+          <p className="settings-description">日历面板由 Windows 任务栏右下角时间控件触发。</p>
+        </section>
+      ) : <div className="calendar-layout">
+        <aside className="detail-panel" aria-label="日期详情">
+          <div className="detail-topline">
+            <span className="detail-caption">日期详情</span>
+            {selectedIsToday && <span className="today-badge">今天</span>}
+          </div>
+          <div className="detail-date">
+            <span className="detail-day">{selected.getDate()}</span>
+            <div>
+              <strong>{selected.getFullYear()}年{selected.getMonth() + 1}月</strong>
+              <span>{["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][selected.getDay()]}</span>
+            </div>
+          </div>
+          <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>农历</span></div>
+          <div className="detail-divider" />
+          <div className="detail-section"><span className="section-label">宜</span><p>安排行程 · 处理工作 · 整理生活</p></div>
+          <div className="detail-section detail-section-muted"><span className="section-label">节日</span><p>{selectedMeta.holiday ?? "暂无节日安排"}</p></div>
+          <button className="detail-today" onClick={() => selectDate(new Date())}>回到今天</button>
+          <div className="side-holiday-card">
+            <div className="footer-links"><span>节日百科</span><span>秋分⌕</span></div>
+            <div className="holiday-summary">
+              <div className="holiday-date"><strong>{selectedMeta.lunar}</strong><b>{selectedMeta.holiday ?? (selectedMeta.holidayStatus === "rest" ? "周末休息" : selectedMeta.holidayStatus === "workday" ? "调休上班" : "普通工作日")}</b></div>
+              <div className="holiday-lines"><p><i className="red-icon">宜</i> 安排行程·处理工作·整理生活</p><p><i className="dark-icon">忌</i> 忽略休息·临时拖延</p></div>
+            </div>
+            <div className="countdown">◷ &nbsp;{selectedMeta.holiday ? `${selectedMeta.holiday} · ${selectedMeta.holidayStatus === "workday" ? "调休上班" : "休息日"}` : "暂无年度节假日安排"}</div>
+          </div>
+        </aside>
+
+        <section className="calendar-area" aria-label="月视图">
         <header className="calendar-header">
           <button className="select-control select-season">假期 <span>⌄</span></button>
           <button className="select-control select-year" onClick={() => setCursor(new Date(cursor.getFullYear() + 1, cursor.getMonth(), 1))}>{cursor.getFullYear()}年 <span>⌄</span></button>
@@ -97,8 +157,9 @@ export function App() {
                     onClick={() => selectDate(day.date)}
                   >
                     <span className="solar-day">{day.date.getDate()}{day.isWorkday && <b className="work-mark">班</b>}</span>
-                    <span className="lunar-day">{day.isToday ? "今天" : day.lunar}</span>
-                    {day.label && <span className="solar-term">{day.label}</span>}
+                    <span className={`lunar-day ${day.holiday || day.label ? "special-day" : ""}`}>
+                      {day.isToday ? "今天" : day.holiday ?? day.label ?? day.lunar}
+                    </span>
                     {day.isRest && <b className="rest-mark">休</b>}
                   </button>
                 );
@@ -117,16 +178,8 @@ export function App() {
           </div>
         )}
 
-        <footer className="calendar-footer">
-          <div className="footer-links"><span>节日百科</span><span>秋分⌕</span></div>
-          <div className="holiday-summary">
-            <div className="holiday-date"><strong>{selectedMeta.lunar}</strong><b>{selectedMeta.holiday ?? (selectedMeta.holidayStatus === "rest" ? "周末休息" : selectedMeta.holidayStatus === "workday" ? "调休上班" : "普通工作日")}</b></div>
-            <div className="holiday-lines"><p><i className="red-icon">宜</i> 安排行程·处理工作·整理生活</p><p><i className="dark-icon">忌</i> 忽略休息·临时拖延</p></div>
-            <span className="summary-arrow">›</span>
-          </div>
-          <div className="countdown">◷ &nbsp;{selectedMeta.holiday ? `${selectedMeta.holiday} · ${selectedMeta.holidayStatus === "workday" ? "调休上班" : "休息日"}` : "暂无年度节假日安排"}</div>
-        </footer>
-      </section>
+        </section>
+      </div>}
     </main>
   );
 }

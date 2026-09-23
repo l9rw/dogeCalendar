@@ -1,16 +1,15 @@
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 
 #[cfg(windows)]
 use std::sync::OnceLock;
 
 #[cfg(windows)]
 use windows::Win32::{
-    Foundation::{LPARAM, LRESULT, POINT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        GetWindowRect, HHOOK, HWND, MSG, MSLLHOOKSTRUCT, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HC_ACTION, WH_MOUSE_LL, WM_LBUTTONUP,
-        WM_RBUTTONUP,
+        GetWindowRect, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint,
+        GA_ROOT, HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
 
@@ -27,7 +26,7 @@ fn class_name(hwnd: HWND) -> String {
 #[cfg(windows)]
 fn is_taskbar_clock(point: POINT) -> bool {
     let hwnd = unsafe { WindowFromPoint(point) };
-    if hwnd.0 == 0 {
+    if hwnd.is_invalid() {
         return false;
     }
 
@@ -37,14 +36,14 @@ fn is_taskbar_clock(point: POINT) -> bool {
         if name.contains("Clock") || name.contains("DateTime") || name == "TrayClockWClass" {
             return true;
         }
-        current = unsafe { GetParent(current) };
-        if current.0 == 0 {
+        current = unsafe { GetParent(current) }.unwrap_or_default();
+        if current.is_invalid() {
             break;
         }
     }
 
     let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    if root.0 == 0 || class_name(root) != "Shell_TrayWnd" {
+    if root.is_invalid() || class_name(root) != "Shell_TrayWnd" {
         return false;
     }
 
@@ -67,21 +66,26 @@ fn is_taskbar_clock(point: POINT) -> bool {
 
 #[cfg(windows)]
 unsafe extern "system" fn mouse_hook(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 && (message.0 == WM_LBUTTONUP as usize || message.0 == WM_RBUTTONUP as usize) {
+    if code == HC_ACTION as i32
+        && (message.0 == WM_LBUTTONDOWN as usize || message.0 == WM_RBUTTONDOWN as usize)
+    {
         let mouse = *(data.0 as *const MSLLHOOKSTRUCT);
         if is_taskbar_clock(mouse.pt) {
             if let Some(app) = APP_HANDLE.get() {
-                let event = if message.0 == WM_LBUTTONUP as usize {
+                let event = if message.0 == WM_LBUTTONDOWN as usize {
                     "taskbar-calendar-click"
                 } else {
                     "taskbar-calendar-context"
                 };
-                let _ = app.emit(event, serde_json::json!({ "x": mouse.pt.x, "y": mouse.pt.y }));
+                let _ = app.emit(
+                    event,
+                    serde_json::json!({ "x": mouse.pt.x, "y": mouse.pt.y }),
+                );
             }
             return LRESULT(1);
         }
     }
-    CallNextHookEx(HHOOK::default(), code, message, data)
+    CallNextHookEx(None, code, message, data)
 }
 
 #[cfg(windows)]
@@ -91,14 +95,32 @@ fn start_mouse_hook(app: tauri::AppHandle) {
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) };
         let Ok(hook) = hook else { return };
         let mut message = MSG::default();
-        while unsafe { GetMessageW(&mut message, HWND::default(), 0, 0) }.0 > 0 {
+        while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
             unsafe {
-                TranslateMessage(&message);
+                let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
         let _ = unsafe { UnhookWindowsHookEx(hook) };
     });
+}
+
+fn show_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_position(tauri::PhysicalPosition::new(x - 1080, y - 620));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            show_calendar_at(app, x, y);
+        }
+    }
 }
 
 #[tauri::command]
@@ -115,6 +137,36 @@ pub fn run() {
             #[cfg(windows)]
             start_mouse_hook(app.handle().clone());
 
+            let handle = app.handle().clone();
+            app.listen("taskbar-calendar-click", move |event| {
+                let Ok(position) = serde_json::from_str::<serde_json::Value>(event.payload())
+                else {
+                    return;
+                };
+                let Some(x) = position.get("x").and_then(|value| value.as_i64()) else {
+                    return;
+                };
+                let Some(y) = position.get("y").and_then(|value| value.as_i64()) else {
+                    return;
+                };
+                toggle_calendar_at(&handle, x as i32, y as i32);
+            });
+
+            let handle = app.handle().clone();
+            app.listen("taskbar-calendar-context", move |event| {
+                let Ok(position) = serde_json::from_str::<serde_json::Value>(event.payload())
+                else {
+                    return;
+                };
+                let Some(x) = position.get("x").and_then(|value| value.as_i64()) else {
+                    return;
+                };
+                let Some(y) = position.get("y").and_then(|value| value.as_i64()) else {
+                    return;
+                };
+                show_calendar_at(&handle, x as i32, y as i32);
+            });
+
             #[cfg(debug_assertions)]
             {
                 let window = app
@@ -125,9 +177,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::Focused(false) => {
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
