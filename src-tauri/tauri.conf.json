@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Calendar",
         "width": 880,
-        "height": 600,
+        "height": 760,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,

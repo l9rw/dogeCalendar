@@ -1,4 +1,4 @@
-use chrono::{Datelike, Local, Timelike, Utc};
+use chrono::{Datelike, Local, Offset, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 
 use crate::domain::{City, WorldClockConfig, WorldClockSnapshot};
@@ -107,12 +107,6 @@ pub fn default_clocks() -> Vec<WorldClockConfig> {
     ]
 }
 
-pub fn snapshot(config: &WorldClockConfig) -> Option<WorldClockSnapshot> {
-    let now = Utc::now();
-    let today_local = Local::now().date_naive();
-    build_snapshot(&config.label, &config.timezone, now, Some(today_local))
-}
-
 pub fn snapshots(configs: &[WorldClockConfig]) -> Vec<WorldClockSnapshot> {
     let now = Utc::now();
     let today_local = Local::now().date_naive();
@@ -128,20 +122,20 @@ fn build_snapshot(
     now: chrono::DateTime<Utc>,
     today_local: Option<chrono::NaiveDate>,
 ) -> Option<WorldClockSnapshot> {
-    let local = if timezone.eq_ignore_ascii_case("local") {
+    if timezone.eq_ignore_ascii_case("local") {
         let local = now.with_timezone(&Local);
-        return Some(make_snapshot(label, "local", &local, today_local));
+        Some(make_snapshot(label, "local", &local, today_local))
     } else {
         let tz: Tz = timezone.parse().ok()?;
-        now.with_timezone(&tz)
-    };
-    Some(make_snapshot(label, timezone, &local, today_local))
+        let local = now.with_timezone(&tz);
+        Some(make_snapshot(label, timezone, &local, today_local))
+    }
 }
 
-fn make_snapshot(
+fn make_snapshot<Tz: TimeZone>(
     label: &str,
     timezone: &str,
-    local: &chrono::DateTime<impl chrono::TimeZone>,
+    local: &chrono::DateTime<Tz>,
     today_local: Option<chrono::NaiveDate>,
 ) -> WorldClockSnapshot {
     let weekday = WEEKDAYS[local.weekday().num_days_from_sunday() as usize];
@@ -154,7 +148,7 @@ fn make_snapshot(
         local.month(),
         local.day()
     );
-    let offset_minutes = offset_minutes_from(&local.format("%z").to_string());
+    let offset_minutes = local.offset().fix().local_minus_utc() / 60;
     let offset_label = format_offset(offset_minutes);
     let is_today = today_local
         .map(|today| local.date_naive() == today)
@@ -182,19 +176,6 @@ fn to_12h(hour: u32) -> (&'static str, u32) {
     } else {
         ("PM", hour - 12)
     }
-}
-
-fn offset_minutes_from(value: &str) -> i32 {
-    let bytes = value.as_bytes();
-    if bytes.len() < 5 {
-        return 0;
-    }
-    let sign = if bytes[0] == b'-' { -1 } else { 1 };
-    let hours = (bytes[1] as char).to_digit(10).unwrap_or(0) * 10
-        + (bytes[2] as char).to_digit(10).unwrap_or(0);
-    let minutes = (bytes[3] as char).to_digit(10).unwrap_or(0) * 10
-        + (bytes[4] as char).to_digit(10).unwrap_or(0);
-    sign * ((hours as i32) * 60 + minutes as i32)
 }
 
 fn format_offset(minutes: i32) -> String {

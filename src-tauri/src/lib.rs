@@ -1,5 +1,13 @@
 use tauri::{Emitter, Listener, Manager};
 
+mod commands;
+mod domain;
+mod providers;
+mod services;
+mod state;
+
+use state::AppState;
+
 #[cfg(windows)]
 use std::sync::OnceLock;
 
@@ -234,8 +242,29 @@ fn fetch_huangli(date: String) -> Result<serde_json::Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![quit_app, fetch_huangli])
+        .invoke_handler(tauri::generate_handler![
+            quit_app,
+            commands::world_time::world_time_list_cities,
+            commands::world_time::world_time_search,
+            commands::world_time::world_time_clocks,
+            commands::world_time::world_time_use_24_hour,
+            commands::world_time::world_time_set_use_24_hour,
+            commands::world_time::world_time_add,
+            commands::world_time::world_time_remove,
+            commands::world_time::world_time_reorder,
+            commands::location::location_get,
+            commands::location::location_set_manual,
+            commands::location::location_clear,
+            commands::weather::weather_get,
+            commands::weather::weather_clear_cache,
+        ])
         .setup(|app| {
+            let dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::temp_dir().join("calendar-desktop"));
+            app.manage(AppState::new(dir));
+
             #[cfg(windows)]
             start_mouse_hook(app.handle().clone());
 

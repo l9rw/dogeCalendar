@@ -3,6 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCalendarMeta, dateKey } from "./services/calendarData";
 import { fetchHuangli, type Huangli } from "./services/huangli";
+import { useInfoStore } from "./stores/infoStore";
+import { WeatherCard } from "./components/WeatherCard";
+import { WorldClockStrip } from "./components/WorldClockStrip";
 
 type CalendarDay = {
   date: Date;
@@ -20,6 +23,32 @@ type CalendarDay = {
 
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 type CalendarView = "month" | "year";
+type ThemeMode = "light" | "dark" | "system";
+const THEME_KEY = "calendar-theme";
+
+export function resolveTheme(mode: ThemeMode, systemDark: boolean): "light" | "dark" {
+  return mode === "system" ? (systemDark ? "dark" : "light") : mode;
+}
+
+function useThemeMode() {
+  const [mode, setMode] = useState<ThemeMode>(() => (localStorage.getItem(THEME_KEY) as ThemeMode) || "system");
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+  const effective = resolveTheme(mode, systemDark);
+  useEffect(() => {
+    document.documentElement.dataset.theme = effective;
+  }, [effective]);
+  const changeTheme = (next: ThemeMode) => {
+    setMode(next);
+    localStorage.setItem(THEME_KEY, next);
+  };
+  return { mode, changeTheme };
+}
 
 function startOfCalendarGrid(year: number, month: number) {
   const first = new Date(year, month, 1);
@@ -59,6 +88,13 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [huangli, setHuangli] = useState<Huangli | null>(null);
   const [huangliLoading, setHuangliLoading] = useState(false);
+  const [manualLat, setManualLat] = useState("");
+  const [manualLon, setManualLon] = useState("");
+  const [manualLabel, setManualLabel] = useState("");
+  const setManualLocation = useInfoStore((state) => state.setManualLocation);
+  const clearLocation = useInfoStore((state) => state.clearLocation);
+  const clearWeatherCache = useInfoStore((state) => state.clearWeatherCache);
+  const { mode: themeMode, changeTheme } = useThemeMode();
   const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
 
   const moveMonth = (offset: number) => {
@@ -107,6 +143,32 @@ export function App() {
     }).then((dispose) => disposers.push(dispose));
     return () => disposers.forEach((dispose) => dispose());
   }, []);
+
+  useEffect(() => {
+    const loadClocks = useInfoStore.getState().loadClocks;
+    let timer: number | undefined;
+    const tick = () => loadClocks();
+    const start = () => {
+      if (timer === undefined) {
+        tick();
+        timer = window.setInterval(tick, 15000);
+      }
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const selectedIsToday = selectedKey === now.toDateString();
 
   return (
@@ -124,9 +186,50 @@ export function App() {
             <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
           </div>
           <p className="settings-description">日历面板由 Windows 任务栏右下角时间控件触发。</p>
+          <div className="settings-section">
+            <span className="section-label">外观</span>
+            <div className="theme-options">
+              {([["light", "日间模式", "始终使用浅色主题"], ["dark", "夜间模式", "始终使用深色主题"], ["system", "跟随系统", "根据系统设置自动切换"]] as const).map(([value, label, desc]) => (
+                <button key={value} className={`theme-option ${themeMode === value ? "active" : ""}`} onClick={() => changeTheme(value)}>
+                  <span className={`theme-dot ${value}`} />
+                  <span className="theme-label">{label}</span>
+                  <span className="theme-desc">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="settings-section">
+            <span className="section-label">位置与天气</span>
+            <p className="settings-description">手动设置坐标会覆盖 IP 定位；清除后会重新使用 IP 兜底。</p>
+            <div className="location-form">
+              <input className="location-input" placeholder="纬度" value={manualLat} onChange={(event) => setManualLat(event.target.value)} inputMode="decimal" />
+              <input className="location-input" placeholder="经度" value={manualLon} onChange={(event) => setManualLon(event.target.value)} inputMode="decimal" />
+              <input className="location-input location-input-wide" placeholder="城市/地点名称" value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} />
+              <button
+                className="location-apply"
+                onClick={() => {
+                  const latitude = Number(manualLat);
+                  const longitude = Number(manualLon);
+                  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+                  setManualLocation(latitude, longitude, manualLabel || "自定义位置");
+                  setManualLat("");
+                  setManualLon("");
+                  setManualLabel("");
+                  setShowSettings(false);
+                }}
+              >
+                应用
+              </button>
+            </div>
+            <div className="location-actions">
+              <button className="location-action" onClick={() => { clearLocation(); }}>清除定位</button>
+              <button className="location-action" onClick={() => { clearWeatherCache(); }}>清除天气缓存</button>
+            </div>
+          </div>
         </section>
-      ) : <div className="calendar-layout">
+      ) : <><div className="calendar-layout">
         <aside className="detail-panel" aria-label="日期详情">
+          <WeatherCard />
           <div className="detail-topline">
             <span className="detail-caption">日期详情</span>
             {selectedIsToday && <span className="today-badge">今天</span>}
@@ -222,9 +325,10 @@ export function App() {
             ))}
           </div>
         )}
-
         </section>
-      </div>}
+      </div>
+      <WorldClockStrip />
+      </>}
     </main>
   );
 }
