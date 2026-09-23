@@ -6,6 +6,7 @@ import { getCalendarMeta } from "./services/calendarData";
 type CalendarDay = {
   date: Date;
   lunar: string;
+  lunarDay: string;
   label?: string;
   holiday?: string;
   isCurrentMonth: boolean;
@@ -35,6 +36,7 @@ function buildMonth(year: number, month: number): CalendarDay[] {
     return {
       date,
       lunar: meta.lunar,
+      lunarDay: meta.lunarDay,
       label: meta.solarTerm,
       holiday: meta.holiday,
       isCurrentMonth: date.getMonth() === month,
@@ -132,13 +134,29 @@ export function App() {
 
         <section className="calendar-area" aria-label="月视图">
         <header className="calendar-header">
-          <button className="select-control select-season">假期 <span>⌄</span></button>
-          <button className="select-control select-year" onClick={() => setCursor(new Date(cursor.getFullYear() + 1, cursor.getMonth(), 1))}>{cursor.getFullYear()}年 <span>⌄</span></button>
           <div className="month-control">
             <button aria-label="上个月" onClick={() => moveMonth(-1)}>‹</button>
-            <button className="select-control" onClick={() => setView("month")}>{cursor.getMonth() + 1}月 <span>⌄</span></button>
+            <select
+              className="calendar-select"
+              aria-label="月份"
+              value={cursor.getMonth()}
+              onChange={(event) => setCursor(new Date(cursor.getFullYear(), Number(event.target.value), 1))}
+            >
+              {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{month + 1}月</option>)}
+            </select>
             <button aria-label="下个月" onClick={() => moveMonth(1)}>›</button>
           </div>
+          <select
+            className="calendar-select calendar-select-year"
+            aria-label="年份"
+            value={cursor.getFullYear()}
+            onChange={(event) => setCursor(new Date(Number(event.target.value), cursor.getMonth(), 1))}
+          >
+            {Array.from({ length: 21 }, (_, offset) => {
+              const year = now.getFullYear() - 10 + offset;
+              return <option key={year} value={year}>{year}年</option>;
+            })}
+          </select>
           <button className="today-button" onClick={() => selectDate(new Date())}>今天</button>
         </header>
 
@@ -158,7 +176,7 @@ export function App() {
                   >
                     <span className="solar-day">{day.date.getDate()}{day.isWorkday && <b className="work-mark">班</b>}</span>
                     <span className={`lunar-day ${day.holiday || day.label ? "special-day" : ""}`}>
-                      {day.isToday ? "今天" : day.holiday ?? day.label ?? day.lunar}
+                      {day.isToday ? "今天" : day.holiday ?? day.label ?? day.lunarDay}
                     </span>
                     {day.isRest && <b className="rest-mark">休</b>}
                   </button>

@@ -2,6 +2,7 @@ export type HolidayType = "holiday" | "rest" | "workday" | "none";
 
 export type CalendarMeta = {
   lunar: string;
+  lunarDay: string;
   solarTerm?: string;
   holiday?: string;
   holidayType: HolidayType;
@@ -90,6 +91,12 @@ function lunarText(date: Date) {
   return `${month}${lunarDayNames[day - 1] ?? day}`;
 }
 
+function lunarDayText(date: Date) {
+  const { day } = lunarParts(date);
+  if (!day) return "";
+  return lunarDayNames[day - 1] ?? String(day);
+}
+
 export function dateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -110,6 +117,7 @@ export function getCalendarMeta(date: Date): CalendarMeta {
 
   return {
     lunar: lunarText(date),
+    lunarDay: lunarDayText(date),
     solarTerm,
     holiday: resolvedHoliday,
     holidayType: resolvedStatus === "workday" ? "workday" : resolvedHoliday ? "holiday" : isWeekend ? "rest" : "workday",
