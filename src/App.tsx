@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCalendarMeta } from "./services/calendarData";
+import { getCalendarMeta, dateKey } from "./services/calendarData";
+import { fetchHuangli, type Huangli } from "./services/huangli";
 
 type CalendarDay = {
   date: Date;
@@ -42,7 +43,7 @@ function buildMonth(year: number, month: number): CalendarDay[] {
       isCurrentMonth: date.getMonth() === month,
       isToday: date.toDateString() === today.toDateString(),
       isWeekend: date.getDay() === 0 || date.getDay() === 6,
-      isRest: meta.holidayStatus === "rest",
+      isRest: (meta.holidayStatus === "rest" || meta.holidayStatus === "holiday") && Boolean(meta.holiday),
       isWorkday: meta.holidayStatus === "workday" && Boolean(meta.holiday),
       holidayType: meta.holidayType,
     };
@@ -56,6 +57,8 @@ export function App() {
   const [view, setView] = useState<CalendarView>("month");
   const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [huangli, setHuangli] = useState<Huangli | null>(null);
+  const [huangliLoading, setHuangliLoading] = useState(false);
   const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
 
   const moveMonth = (offset: number) => {
@@ -73,6 +76,24 @@ export function App() {
 
   const selectedKey = selected.toDateString();
   const selectedMeta = getCalendarMeta(selected);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHuangliLoading(true);
+    fetchHuangli(dateKey(selected))
+      .then((data) => {
+        if (!cancelled) setHuangli(data);
+      })
+      .catch(() => {
+        if (!cancelled) setHuangli(null);
+      })
+      .finally(() => {
+        if (!cancelled) setHuangliLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey]);
 
   useEffect(() => {
     const disposers: Array<() => void> = [];
@@ -119,16 +140,22 @@ export function App() {
           </div>
           <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>农历</span></div>
           <div className="detail-divider" />
-          <div className="detail-section"><span className="section-label">宜</span><p>安排行程 · 处理工作 · 整理生活</p></div>
-          <div className="detail-section detail-section-muted"><span className="section-label">节日</span><p>{selectedMeta.holiday ?? "暂无节日安排"}</p></div>
-          <button className="detail-today" onClick={() => selectDate(new Date())}>回到今天</button>
+          <div className="detail-section"><span className="section-label">宜</span><p className="yi-list">{huangli?.yi?.length ? huangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
+          <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p className="ji-list">{huangli?.ji?.length ? huangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
+          <div className="huangli-meta">
+            {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
+            {huangli?.shengxiao && <span><i>生肖</i>{huangli.shengxiao}</span>}
+            {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
+            {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
+            {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
+          </div>
           <div className="side-holiday-card">
-            <div className="footer-links"><span>节日百科</span><span>秋分⌕</span></div>
-            <div className="holiday-summary">
-              <div className="holiday-date"><strong>{selectedMeta.lunar}</strong><b>{selectedMeta.holiday ?? (selectedMeta.holidayStatus === "rest" ? "周末休息" : selectedMeta.holidayStatus === "workday" ? "调休上班" : "普通工作日")}</b></div>
-              <div className="holiday-lines"><p><i className="red-icon">宜</i> 安排行程·处理工作·整理生活</p><p><i className="dark-icon">忌</i> 忽略休息·临时拖延</p></div>
-            </div>
-            <div className="countdown">◷ &nbsp;{selectedMeta.holiday ? `${selectedMeta.holiday} · ${selectedMeta.holidayStatus === "workday" ? "调休上班" : "休息日"}` : "暂无年度节假日安排"}</div>
+            {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
+            {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
+            {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
+            {!huangli && !huangliLoading && (
+              <div className="holiday-lines"><p><i className="dark-icon">·</i>黄历接口暂时不可用</p></div>
+            )}
           </div>
         </aside>
 

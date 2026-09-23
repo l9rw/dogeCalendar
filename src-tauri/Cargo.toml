@@ -16,9 +16,14 @@ tauri = { version = "2.11.6", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2.5.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+chrono-tz = { version = "0.10", features = ["serde"] }
+ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

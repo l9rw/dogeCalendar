@@ -105,9 +105,37 @@ fn start_mouse_hook(app: tauri::AppHandle) {
     });
 }
 
+#[cfg(windows)]
+fn work_area_anchor(x: i32, y: i32) -> (i32, i32) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    };
+    let monitor = unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe {
+        let _ = GetMonitorInfoW(monitor, &mut info);
+    }
+    (info.rcWork.right, info.rcWork.bottom)
+}
+
+#[cfg(not(windows))]
+fn work_area_anchor(x: i32, y: i32) -> (i32, i32) {
+    (x, y)
+}
+
 fn show_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_position(tauri::PhysicalPosition::new(x - 1080, y - 620));
+        let size = window.outer_size().unwrap_or_default();
+        let (anchor_x, anchor_y) = work_area_anchor(x, y);
+        let pos = tauri::PhysicalPosition::new(
+            anchor_x - size.width as i32 - 8,
+            anchor_y - size.height as i32 - 4,
+        );
+        let _ = window.set_position(pos);
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -128,11 +156,85 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+fn huangli_pick<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    for key in keys {
+        if let Some(value) = obj.get(*key).and_then(|v| v.as_str()) {
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn huangli_split_list(value: &str) -> Vec<String> {
+    value
+        .split(['，', ',', '、', ' ', '/'])
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn huangli_normalize(data: &serde_json::Value, source: &str) -> serde_json::Value {
+    let yi = huangli_pick(data, &["y", "yi", "suit", "宜"]).unwrap_or("");
+    let ji = huangli_pick(data, &["j", "ji", "avoid", "忌"]).unwrap_or("");
+    serde_json::json!({
+        "source": source,
+        "lunar": huangli_pick(data, &["lunar", "nongli", "lunarCalendar"]).unwrap_or(""),
+        "ganzhi": huangli_pick(data, &["luna", "ganzhi", "ganZhi", "lunarGanZhi"]).unwrap_or(""),
+        "week": huangli_pick(data, &["week", "weekday", "weeks"]).unwrap_or(""),
+        "xingzuo": huangli_pick(data, &["xingzuo", "star", "constellation"]).unwrap_or(""),
+        "shengxiao": huangli_pick(data, &["shengxiao", "zodiac", "animals"]).unwrap_or(""),
+        "festival": huangli_pick(data, &["jieri", "festival", "holiday"]).unwrap_or(""),
+        "jieqi": huangli_pick(data, &["suicide", "jieqi", "solarTerm", "jq"]).unwrap_or(""),
+        "yi": huangli_split_list(yi),
+        "ji": huangli_split_list(ji),
+        "pengsheng": huangli_pick(data, &["pengsheng", "pengzu", "pz"]).unwrap_or(""),
+        "baiji": huangli_pick(data, &["baiji", "bj"]).unwrap_or(""),
+        "zhushen": huangli_pick(data, &["zhushen", "zh", "valueGod"]).unwrap_or(""),
+        "taishen": huangli_pick(data, &["taishen", "ts", "fetalGod"]).unwrap_or(""),
+    })
+}
+
+fn huangli_request(agent: &ureq::Agent, url: &str) -> Option<serde_json::Value> {
+    let response = agent.get(url).call().ok()?;
+    let json: serde_json::Value = response.into_json().ok()?;
+    if let Some(data) = json.get("data") {
+        if data.is_object() {
+            return Some(data.clone());
+        }
+    }
+    if json.is_object() && (json.get("y").is_some() || json.get("yi").is_some() || json.get("j").is_some()) {
+        return Some(json);
+    }
+    None
+}
+
+#[tauri::command]
+fn fetch_huangli(date: String) -> Result<serde_json::Value, String> {
+    let agent = ureq::AgentBuilder::new()
+        .user_agent("Calendar/0.1.0")
+        .timeout(std::time::Duration::from_secs(8))
+        .build();
+
+    let vvhan = format!("https://api.vvhan.com/api/huangli/date?date={}", date);
+    if let Some(data) = huangli_request(&agent, &vvhan) {
+        return Ok(huangli_normalize(&data, "vvhan"));
+    }
+
+    let oioweb = format!("https://api.oioweb.cn/api/common/huangli?date={}", date);
+    if let Some(data) = huangli_request(&agent, &oioweb) {
+        return Ok(huangli_normalize(&data, "oioweb"));
+    }
+
+    Err(format!("黄历接口暂时不可用: {}", date))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![quit_app])
+        .invoke_handler(tauri::generate_handler![quit_app, fetch_huangli])
         .setup(|app| {
             #[cfg(windows)]
             start_mouse_hook(app.handle().clone());
