@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCalendarMeta, dateKey } from "./services/calendarData";
 import { fetchHuangli, type Huangli } from "./services/huangli";
 import { useInfoStore } from "./stores/infoStore";
+import type { WeatherReport } from "./services/ipc";
 import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
 
@@ -166,6 +167,18 @@ export function App() {
     return () => {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const dispose = listen<unknown>("weather-refreshed", (event) => {
+      if (disposed) return;
+      useInfoStore.getState().applyWeather(event.payload as WeatherReport);
+    });
+    return () => {
+      disposed = true;
+      dispose.then((fn) => fn());
     };
   }, []);
 

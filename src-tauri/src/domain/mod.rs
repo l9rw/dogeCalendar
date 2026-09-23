@@ -58,7 +58,7 @@ pub struct WeatherReport {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StoreData {
     pub world_clocks: Vec<WorldClockConfig>,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub use_24_hour: bool,
     #[serde(default)]
     pub location: Option<StoredLocation>,
@@ -68,4 +68,8 @@ pub struct StoreData {
     pub weather_failures: u32,
     #[serde(default)]
     pub last_weather_attempt: Option<i64>,
+}
+
+fn default_true() -> bool {
+    true
 }

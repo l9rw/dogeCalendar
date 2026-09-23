@@ -1,13 +1,14 @@
+use std::sync::Arc;
+
 use crate::services::store::Store;
 
 pub struct AppState {
-    pub store: Store,
+    pub store: Arc<Store>,
     pub http: reqwest::Client,
 }
 
 impl AppState {
     pub fn new(dir: std::path::PathBuf) -> Self {
-        // Surface a default store on first run so users see clocks immediately.
         let store = Store::open(dir);
         {
             let mut data = store.data.lock().expect("store mutex poisoned");
@@ -16,6 +17,7 @@ impl AppState {
             }
         }
         store.persist();
+        let store = Arc::new(store);
 
         let http = reqwest::Client::builder()
             .user_agent("calendar-desktop/0.1")

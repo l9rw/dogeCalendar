@@ -28,6 +28,7 @@ type InfoState = {
   search: (query: string) => Promise<void>;
 
   loadWeather: () => Promise<void>;
+  applyWeather: (report: WeatherReport) => void;
   clearWeatherCache: () => Promise<void>;
   loadLocation: () => Promise<void>;
   setManualLocation: (
@@ -102,6 +103,8 @@ export const useInfoStore = create<InfoState>((set, get) => ({
       set({ loadingWeather: false });
     }
   },
+
+  applyWeather: (report) => set({ weather: report }),
 
   clearWeatherCache: async () => {
     await weatherApi.clearCache();

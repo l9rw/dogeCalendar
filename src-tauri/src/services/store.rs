@@ -40,8 +40,8 @@ impl Store {
 
 fn load(path: &Path) -> StoreData {
     match std::fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => StoreData::default(),
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| serde_json::from_str("{}").unwrap_or_default()),
+        Err(_) => serde_json::from_str("{}").unwrap_or_default(),
     }
 }
 
