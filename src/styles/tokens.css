@@ -46,6 +46,7 @@ button { font: inherit; }
 .day-cell.muted { color: #bebebe; }
 .day-cell.weekend:not(.muted) .solar-day { color: var(--red); }
 .day-cell.holiday-cell { margin: 1px 2px; background: #fff5f5; }
+.day-cell.workday-cell { margin: 1px 2px; background: #f2f5ff; }
 .day-cell.selected { outline: 2px solid var(--blue); outline-offset: -1px; background: #fff; }
 .solar-day, .lunar-day, .solar-term { position: relative; z-index: 1; display: block; text-align: center; }
 .solar-day { font-size: 22px; font-weight: 500; line-height: 26px; }
