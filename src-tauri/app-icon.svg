@@ -1,19 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="background" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#78A8FF"/>
-      <stop offset="1" stop-color="#356FE4"/>
+    <linearGradient id="bg" x1="48" y1="48" x2="464" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF1D6"/>
+      <stop offset="1" stop-color="#F4C57A"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="256" y1="110" x2="256" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8B070"/>
+      <stop offset="1" stop-color="#C6823C"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="256" y1="60" x2="256" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C57F38"/>
+      <stop offset="1" stop-color="#A8632B"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="118" fill="url(#background)"/>
-  <rect x="91" y="111" width="330" height="310" rx="58" fill="#F9FBFF"/>
-  <path d="M91 169C91 137 117 111 149 111H363C395 111 421 137 421 169V194H91V169Z" fill="#DDE9FF"/>
-  <rect x="155" y="73" width="34" height="80" rx="17" fill="#F9FBFF"/>
-  <rect x="323" y="73" width="34" height="80" rx="17" fill="#F9FBFF"/>
-  <circle cx="174" cy="257" r="24" fill="#75A4FC"/>
-  <circle cx="256" cy="257" r="24" fill="#75A4FC"/>
-  <circle cx="338" cy="257" r="24" fill="#75A4FC"/>
-  <circle cx="174" cy="338" r="24" fill="#75A4FC"/>
-  <circle cx="256" cy="338" r="36" fill="#356FE4"/>
-  <circle cx="338" cy="338" r="24" fill="#75A4FC"/>
+
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+
+  <g id="ears">
+    <path d="M168 168 L96 66 L214 124 Z" fill="url(#ear)"/>
+    <path d="M344 168 L416 66 L298 124 Z" fill="url(#ear)"/>
+    <path d="M172 158 L122 92 L200 128 Z" fill="#F3B6A0"/>
+    <path d="M340 158 L390 92 L312 128 Z" fill="#F3B6A0"/>
+  </g>
+
+  <path id="head" d="M128 196 C128 124 188 88 256 88 C324 88 384 124 384 196 C384 262 360 322 318 352 C296 368 276 374 256 374 C236 374 216 368 194 352 C152 322 128 262 128 196 Z" fill="url(#fur)"/>
+
+  <path id="muzzle" d="M196 300 C196 268 224 250 256 250 C288 250 316 268 316 300 C316 344 290 372 256 372 C222 372 196 344 196 300 Z" fill="#FBEBD0"/>
+
+  <path id="brow-l" d="M188 208 C210 196 234 198 250 214 C234 220 214 222 196 224 Z" fill="#D89855" opacity="0.55"/>
+  <path id="brow-r" d="M324 208 C302 196 278 198 262 214 C278 220 298 222 316 224 Z" fill="#D89855" opacity="0.55"/>
+
+  <g id="eyes">
+    <ellipse cx="208" cy="232" rx="21" ry="17" fill="#2A1B12" transform="rotate(-8 208 232)"/>
+    <ellipse cx="304" cy="232" rx="21" ry="17" fill="#2A1B12" transform="rotate(8 304 232)"/>
+    <circle cx="214" cy="227" r="5" fill="#FFFFFF"/>
+    <circle cx="310" cy="227" r="5" fill="#FFFFFF"/>
+  </g>
+
+  <path id="nose" d="M240 290 C240 278 248 272 256 272 C264 272 272 278 272 290 C272 302 264 308 256 308 C248 308 240 302 240 290 Z" fill="#2A1B12"/>
+  <path d="M256 308 L256 320" stroke="#2A1B12" stroke-width="6" stroke-linecap="round"/>
+
+  <path id="mouth" d="M256 320 C246 336 230 340 220 332 M256 320 C266 336 282 340 292 332" fill="none" stroke="#2A1B12" stroke-width="7" stroke-linecap="round"/>
+
+  <path id="cheek-l" d="M150 268 C172 262 190 268 196 286 C184 300 166 304 152 296 Z" fill="#FBEBD0" opacity="0.85"/>
+  <path id="cheek-r" d="M362 268 C340 262 322 268 316 286 C328 300 346 304 360 296 Z" fill="#FBEBD0" opacity="0.85"/>
 </svg>
