@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the calendar window",
-  "windows": ["main"],
+  "windows": ["main", "detail", "clock"],
   "permissions": ["core:default", "opener:default"]
 }

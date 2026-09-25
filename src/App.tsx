@@ -80,15 +80,109 @@ function buildMonth(year: number, month: number): CalendarDay[] {
   });
 }
 
+function DetailPanel() {
+  const [selected, setSelected] = useState(() => {
+    const date = new URLSearchParams(window.location.search).get("date");
+    return date ? new Date(`${date}T12:00:00`) : new Date();
+  });
+  const [huangli, setHuangli] = useState<Huangli | null>(null);
+  const [huangliLoading, setHuangliLoading] = useState(false);
+  const selectedKey = dateKey(selected);
+  const selectedMeta = getCalendarMeta(selected);
+
+  useEffect(() => {
+    let disposed = false;
+    const listener = listen<string>("detail-date-changed", (event) => {
+      if (!disposed) setSelected(new Date(`${event.payload}T12:00:00`));
+    });
+    return () => { disposed = true; listener.then((dispose) => dispose()); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHuangli(null);
+    setHuangliLoading(true);
+    fetchHuangli(selectedKey)
+      .then((data) => { if (!cancelled) setHuangli(data); })
+      .catch(() => { if (!cancelled) setHuangli(null); })
+      .finally(() => { if (!cancelled) setHuangliLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedKey]);
+
+  return (
+    <main className="aux-shell detail-panel" aria-label="日期详情">
+      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel: "detail" })} aria-label="关闭">×</button>
+      <WeatherCard />
+      <div className="detail-topline">
+        <span className="detail-caption">日期详情</span>
+        {selected.toDateString() === new Date().toDateString() && <span className="today-badge">今天</span>}
+      </div>
+      <div className="detail-date">
+        <span className="detail-day">{selected.getDate()}</span>
+        <div>
+          <strong>{selected.getFullYear()}年{selected.getMonth() + 1}月</strong>
+          <span>{["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][selected.getDay()]}</span>
+        </div>
+      </div>
+      <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>农历</span></div>
+      <div className="detail-divider" />
+      <div className="detail-section"><span className="section-label">宜</span><p className="yi-list">{huangli?.yi?.length ? huangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
+      <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p className="ji-list">{huangli?.ji?.length ? huangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
+      <div className="huangli-meta">
+        {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
+        {huangli?.shengxiao && <span><i>生肖</i>{huangli.shengxiao}</span>}
+        {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
+        {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
+        {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
+      </div>
+      <div className="side-holiday-card">
+        {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
+        {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
+        {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
+        {!huangli && !huangliLoading && <div className="holiday-lines"><p><i className="dark-icon">·</i>黄历接口暂时不可用</p></div>}
+      </div>
+    </main>
+  );
+}
+
+function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
+  useThemeMode();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") invoke("close_aux_panel", { panel });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [panel]);
+  useEffect(() => {
+    if (panel !== "clock") return;
+    const tick = () => { if (!document.hidden) void useInfoStore.getState().loadClocks(); };
+    const timer = window.setInterval(tick, 15000);
+    return () => window.clearInterval(timer);
+  }, [panel]);
+  if (panel === "detail") return <DetailPanel />;
+  return (
+    <main className="aux-shell clock-panel" aria-label="世界时间">
+      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel })} aria-label="关闭">×</button>
+      <WorldClockStrip />
+    </main>
+  );
+}
+
 export function App() {
+  const panel = new URLSearchParams(window.location.search).get("panel");
+  if (panel === "detail" || panel === "clock") return <AuxiliaryPanel panel={panel} />;
+  return <CalendarApp />;
+}
+
+function CalendarApp() {
   const now = new Date();
   const [cursor, setCursor] = useState(new Date(2026, 8, 1));
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
   const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [huangli, setHuangli] = useState<Huangli | null>(null);
-  const [huangliLoading, setHuangliLoading] = useState(false);
+  const [showToolbarMenu, setShowToolbarMenu] = useState(false);
   const [manualLat, setManualLat] = useState("");
   const [manualLon, setManualLon] = useState("");
   const [manualLabel, setManualLabel] = useState("");
@@ -105,6 +199,7 @@ export function App() {
   const selectDate = (date: Date) => {
     setSelected(date);
     setCursor(new Date(date.getFullYear(), date.getMonth(), 1));
+    void invoke("open_aux_panel", { panel: "detail", date: dateKey(date) });
   };
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
@@ -112,25 +207,6 @@ export function App() {
   };
 
   const selectedKey = selected.toDateString();
-  const selectedMeta = getCalendarMeta(selected);
-
-  useEffect(() => {
-    let cancelled = false;
-    setHuangliLoading(true);
-    fetchHuangli(dateKey(selected))
-      .then((data) => {
-        if (!cancelled) setHuangli(data);
-      })
-      .catch(() => {
-        if (!cancelled) setHuangli(null);
-      })
-      .finally(() => {
-        if (!cancelled) setHuangliLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedKey]);
 
   useEffect(() => {
     const disposers: Array<() => void> = [];
@@ -181,8 +257,6 @@ export function App() {
       dispose.then((fn) => fn());
     };
   }, []);
-
-  const selectedIsToday = selectedKey === now.toDateString();
 
   return (
     <main className="calendar-shell">
@@ -241,40 +315,6 @@ export function App() {
           </div>
         </section>
       ) : <><div className="calendar-layout">
-        <aside className="detail-panel" aria-label="日期详情">
-          <WeatherCard />
-          <div className="detail-topline">
-            <span className="detail-caption">日期详情</span>
-            {selectedIsToday && <span className="today-badge">今天</span>}
-          </div>
-          <div className="detail-date">
-            <span className="detail-day">{selected.getDate()}</span>
-            <div>
-              <strong>{selected.getFullYear()}年{selected.getMonth() + 1}月</strong>
-              <span>{["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][selected.getDay()]}</span>
-            </div>
-          </div>
-          <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>农历</span></div>
-          <div className="detail-divider" />
-          <div className="detail-section"><span className="section-label">宜</span><p className="yi-list">{huangli?.yi?.length ? huangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
-          <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p className="ji-list">{huangli?.ji?.length ? huangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
-          <div className="huangli-meta">
-            {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
-            {huangli?.shengxiao && <span><i>生肖</i>{huangli.shengxiao}</span>}
-            {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
-            {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
-            {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
-          </div>
-          <div className="side-holiday-card">
-            {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
-            {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
-            {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
-            {!huangli && !huangliLoading && (
-              <div className="holiday-lines"><p><i className="dark-icon">·</i>黄历接口暂时不可用</p></div>
-            )}
-          </div>
-        </aside>
-
         <section className="calendar-area" aria-label="月视图">
         <header className="calendar-header">
           <div className="month-control">
@@ -300,9 +340,69 @@ export function App() {
               return <option key={year} value={year}>{year}年</option>;
             })}
           </select>
-          <button className="today-button" onClick={() => selectDate(new Date())}>今天</button>
+          <div className="calendar-toolbar">
+            <button
+              className="toolbar-icon"
+              aria-label="返回今天"
+              title="返回今天"
+              onClick={() => selectDate(new Date())}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.2" fill="currentColor" />
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M12 1.6v3.2M12 19.2v3.2M1.6 12h3.2M19.2 12h3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              className="toolbar-icon"
+              aria-label="日期详情"
+              title="日期详情"
+              onClick={() => void invoke("open_aux_panel", { panel: "detail", date: dateKey(selected) })}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <rect x="3.5" y="5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <circle cx="8.5" cy="14.5" r="1.3" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              className="toolbar-icon toolbar-menu-toggle"
+              aria-label="更多"
+              title="更多"
+              aria-pressed={showToolbarMenu}
+              onClick={() => setShowToolbarMenu((value) => !value)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.7" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+                <circle cx="19" cy="12" r="1.7" fill="currentColor" />
+              </svg>
+            </button>
+            {showToolbarMenu && (
+              <>
+                <button
+                  className="toolbar-menu-overlay"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onClick={() => setShowToolbarMenu(false)}
+                />
+                <div className="toolbar-menu" role="menu">
+                  <button
+                    role="menuitem"
+                    className="toolbar-menu-item"
+                    onClick={() => { void invoke("open_aux_panel", { panel: "clock" }); setShowToolbarMenu(false); }}
+                  >
+                    <span className="toolbar-menu-check" />
+                    <span>世界时钟</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
 
+        <div className="calendar-body">
         {view === "month" ? (
           <div className="calendar-card" onWheel={handleCalendarWheel}>
             <div className="weekday-row">
@@ -338,9 +438,9 @@ export function App() {
             ))}
           </div>
         )}
+        </div>
         </section>
       </div>
-      <WorldClockStrip />
       </>}
     </main>
   );

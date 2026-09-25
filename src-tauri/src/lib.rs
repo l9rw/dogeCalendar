@@ -1,4 +1,4 @@
-use tauri::{Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod commands;
 mod domain;
@@ -164,6 +164,72 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) -> Result<(), String> {
+    let (label, title, width, height) = match panel.as_str() {
+        "detail" => ("detail", "日期详情", 350.0, 600.0),
+        "clock" => ("clock", "世界时间", 520.0, 300.0),
+        _ => return Err("未知面板".into()),
+    };
+    if let Some(window) = app.get_webview_window(label) {
+        if label == "detail" {
+            if let Some(date) = date {
+                app.emit_to(label, "detail-date-changed", date)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
+    let scale = main.scale_factor().map_err(|error| error.to_string())?;
+    let main_pos = main.outer_position().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
+    let main_size = main.outer_size().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
+    let (left, top, right, bottom) = if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
+        let pos = monitor.position().to_logical::<f64>(scale);
+        let size = monitor.size().to_logical::<f64>(scale);
+        (pos.x, pos.y, pos.x + size.width, pos.y + size.height)
+    } else {
+        (main_pos.x, main_pos.y, main_pos.x + main_size.width, main_pos.y + main_size.height)
+    };
+    let x = if main_pos.x - width - 12.0 >= left {
+        main_pos.x - width - 12.0
+    } else {
+        main_pos.x + main_size.width + 12.0
+    }.clamp(left, (right - width).max(left));
+    let y = main_pos.y.clamp(top, (bottom - height).max(top));
+    let url = if label == "detail" {
+        format!("index.html?panel=detail&date={}", date.unwrap_or_default())
+    } else {
+        "index.html?panel=clock".to_string()
+    };
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
+        .title(title)
+        .inner_size(width, height)
+        .position(x, y)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
+    if panel != "detail" && panel != "clock" {
+        return Err("未知面板".into());
+    }
+    if let Some(window) = app.get_webview_window(&panel) {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn huangli_pick<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
     for key in keys {
         if let Some(value) = obj.get(*key).and_then(|v| v.as_str()) {
@@ -244,6 +310,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             quit_app,
+            open_aux_panel,
+            close_aux_panel,
             commands::world_time::world_time_list_cities,
             commands::world_time::world_time_search,
             commands::world_time::world_time_clocks,
@@ -257,6 +325,7 @@ pub fn run() {
             commands::location::location_clear,
             commands::weather::weather_get,
             commands::weather::weather_clear_cache,
+            fetch_huangli,
         ])
         .setup(|app| {
             let dir = app
@@ -314,7 +383,13 @@ pub fn run() {
                     let _ = window.hide();
                 }
                 tauri::WindowEvent::Focused(false) => {
-                    let _ = window.hide();
+                    let aux_visible = ["detail", "clock"].iter().any(|label| {
+                        window.app_handle().get_webview_window(label)
+                            .is_some_and(|aux| aux.is_visible().unwrap_or(false))
+                    });
+                    if window.label() != "main" || !aux_visible {
+                        let _ = window.hide();
+                    }
                 }
                 _ => {}
             }
