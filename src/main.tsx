@@ -5,6 +5,9 @@ import "./styles/tokens.css";
 
 const storedTheme = (localStorage.getItem("calendar-theme") as "light" | "dark" | "system" | null) || "system";
 document.documentElement.dataset.theme = resolveTheme(storedTheme, window.matchMedia("(prefers-color-scheme: dark)").matches);
+if ("__TAURI_INTERNALS__" in window && navigator.userAgent.includes("Macintosh")) {
+  document.documentElement.dataset.platform = "macos";
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

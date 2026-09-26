@@ -49,7 +49,7 @@ Planned:
 
 Before developing the Tauri desktop app, prepare:
 
-- Node.js 18 or higher
+- Node.js 20.19+ or 22.12+ (required by Vite 7)
 - npm
 - Rust stable toolchain
 - Tauri 2 system development dependencies
@@ -59,7 +59,7 @@ A Windows dev environment also typically requires:
 - Microsoft Visual Studio Build Tools, with the C++ desktop development workload
 - WebView2 Runtime
 
-A macOS dev environment also typically requires:
+A macOS desktop dev environment also requires:
 
 - Xcode Command Line Tools
 
@@ -83,15 +83,49 @@ npm run dev
 
 This is handy for quickly inspecting the React UI, but it does not launch the Tauri tray or native window behavior.
 
-### Tauri desktop dev
+### macOS desktop development
 
-Start dev mode with the native window and system tray:
+1. Install Xcode Command Line Tools (full Xcode is not needed for macOS desktop development):
+
+   ```bash
+   xcode-select --install
+   xcode-select -p
+   ```
+
+2. Install Node.js 20.19+ (20.x) or 22.12+, npm, and Rust stable. This example uses [Homebrew](https://brew.sh/); skip installation commands for tools you already have. Homebrew's `rustup` requires its binaries on `PATH` (`brew --prefix` works on both Apple Silicon and Intel Macs):
+
+   ```bash
+   brew install node rustup
+   export PATH="$(brew --prefix rustup)/bin:$PATH"
+   rustup default stable
+   node --version
+   npm --version
+   rustc --version
+   cargo --version
+   ```
+
+   Add the `export PATH=...` line above to `~/.zshrc` to make Rust available in new terminals, then open a new terminal. If Rust is already installed through another method, just verify that `rustc` and `cargo` are available.
+
+3. From the project root, install dependencies and launch the native app:
+
+   ```bash
+   npm install
+   npm run tauri:dev
+   ```
+
+The main window starts hidden. Use the macOS **menu bar status icon** (not the window's title-bar controls): left-click to toggle the calendar panel beneath the icon; clicking outside dismisses it. Right-click for Open calendar, Settings, and Quit. The app has no Dock icon, so quit via the right-click menu or press `Ctrl+C` in the dev terminal. Browser-only `npm run dev` does not provide a menu bar icon.
+
+The Tauri dev URL is `http://localhost:1420`. Run `npm run tauri:build` to bundle the macOS app. This project enables `macOSPrivateApi` for transparent windows; builds using this private API cannot be submitted to the Mac App Store.
+
+### Other desktop platforms
+
+After installing the platform prerequisites, start dev mode with the native window:
 
 ```bash
 npm run tauri:dev
 ```
 
-The dev URL in the Tauri config is `http://localhost:1420`. In dev mode the main window is hidden by default and can be shown via the tray icon or the "Open calendar" item in the tray menu.
+The main window starts hidden in dev mode and can be reopened through the platform's entry point.
 
 ## Build
 

@@ -49,7 +49,7 @@
 
 开发 Tauri 桌面端前，需要准备：
 
-- Node.js 18 或更高版本
+- Node.js 20.19+ 或 22.12+（Vite 7 要求）
 - npm
 - Rust stable 工具链
 - Tauri 2 对应的系统开发依赖
@@ -59,7 +59,7 @@ Windows 开发环境通常还需要：
 - Microsoft Visual Studio Build Tools，并安装 C++ 桌面开发工作负载
 - WebView2 Runtime
 
-macOS 开发环境通常还需要：
+macOS 桌面开发还需要：
 
 - Xcode Command Line Tools
 
@@ -83,15 +83,49 @@ npm run dev
 
 该方式适合快速查看 React UI，但不会启动 Tauri 托盘和原生窗口行为。
 
-### Tauri 桌面开发
+### macOS 桌面开发
 
-启动带原生窗口和系统托盘的开发模式：
+1. 安装 Xcode Command Line Tools（仅开发 macOS 桌面版不必安装完整 Xcode）：
+
+   ```bash
+   xcode-select --install
+   xcode-select -p
+   ```
+
+2. 安装 Node.js 20.19+（20.x）或 22.12+、npm 和 Rust stable。以下示例使用 [Homebrew](https://brew.sh/)；已安装 Node.js 或 Rust 的机器可跳过对应安装命令。Homebrew 安装的 `rustup` 需要将其命令目录加入 `PATH`（`brew --prefix` 同时适用于 Apple Silicon 和 Intel）：
+
+   ```bash
+   brew install node rustup
+   export PATH="$(brew --prefix rustup)/bin:$PATH"
+   rustup default stable
+   node --version
+   npm --version
+   rustc --version
+   cargo --version
+   ```
+
+   为使新终端也能找到 Rust，将上述 `export PATH=...` 一行加入 `~/.zshrc`，然后重新打开终端。若使用其他方式安装 Rust，无需重复安装 `rustup`，只需确认 `rustc` 和 `cargo` 可用。
+
+3. 在项目根目录安装依赖并启动原生开发模式：
+
+   ```bash
+   npm install
+   npm run tauri:dev
+   ```
+
+主窗口默认隐藏；macOS **菜单栏状态图标**（不是窗口左上角的标题栏按钮）是入口。左键点击图标在按钮下方打开或收起日历，点击面板外也会收起；右键点击图标可从菜单打开日历、设置或退出。应用不显示 Dock 图标，因此退出请使用右键菜单，或在运行开发命令的终端按 `Ctrl+C`。浏览器模式 `npm run dev` 不会显示菜单栏图标。
+
+Tauri 配置中的开发地址为 `http://localhost:1420`。构建 macOS 应用可运行 `npm run tauri:build`；项目为透明窗口启用了 `macOSPrivateApi`，使用此私有 API 的构建不能提交 Mac App Store。
+
+### 其他桌面平台
+
+安装相应平台依赖后，启动 Tauri 开发模式：
 
 ```bash
 npm run tauri:dev
 ```
 
-Tauri 配置中的开发地址为 `http://localhost:1420`。开发模式下主窗口默认隐藏，可通过托盘图标或托盘菜单中的“打开日历”显示。
+开发模式下主窗口默认隐藏，可通过平台入口重新打开。
 
 ## 构建
 
@@ -155,7 +189,7 @@ calendar/
 - 点击“今天”回到当前日期。
 - 点击右上角主题按钮切换明暗模式。
 - 点击“设置”打开设置面板；托盘菜单也可以打开设置。
-- 关闭窗口时应用会隐藏到系统托盘，使用托盘图标可以再次打开。
+- 关闭窗口时应用会隐藏；Windows 可通过任务栏时间控件再次打开，macOS 可通过菜单栏图标再次打开。
 
 ## 架构方向
 

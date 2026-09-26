@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+            extension: exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundle: dmg
+            extension: dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check release version
+        shell: bash
+        run: |
+          node -e 'const version = require("./src-tauri/tauri.conf.json").version; if (process.env.GITHUB_REF_NAME !== `v${version}` || require("./package.json").version !== version) { throw new Error(`Tag and app versions must match: expected v${version}`); }'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Build installer
+        run: npm run tauri:build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: calendar-${{ matrix.target }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.${{ matrix.extension }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: calendar-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --title "Calendar $GITHUB_REF_NAME" --generate-notes --verify-tag

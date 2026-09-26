@@ -1,5 +1,16 @@
 use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use tauri::{
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    window::{Effect, EffectsBuilder},
+};
+
+#[cfg(target_os = "macos")]
+static PANEL_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 mod commands;
 mod domain;
 mod providers;
@@ -159,6 +170,156 @@ fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use objc2_app_kit::{NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior};
+
+    window.set_effects(
+        EffectsBuilder::new()
+            .effect(Effect::Menu)
+            .radius(16.0)
+            .build(),
+    )?;
+    window.set_shadow(true)?;
+    let ns_window = window.ns_window()? as *mut NSWindow;
+    // The window is created by Tauri; AppKit settings make it behave as a transient menu panel.
+    unsafe {
+        (*ns_window).setLevel(NSFloatingWindowLevel);
+        (*ns_window).setHidesOnDeactivate(true);
+        (*ns_window).setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Transient
+                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn menu_bar_icon() -> tauri::image::Image<'static> {
+    // A monochrome 18pt calendar at 2x, with transparent pixels for AppKit's template tint.
+    let mut pixels = vec![0; 36 * 36 * 4];
+    for y in 0..36 {
+        for x in 0..36 {
+            let outline = (x == 5 || x == 30) && (8..=31).contains(&y)
+                || (y == 8 || y == 31 || y == 16) && (5..=30).contains(&x);
+            let ring = (y >= 4 && y <= 11) && ((10..=12).contains(&x) || (23..=25).contains(&x));
+            let date = (20..=26).contains(&y) && ((10..=14).contains(&x) || (19..=23).contains(&x));
+            if outline || ring || date {
+                let index = (y * 36 + x) * 4;
+                pixels[index + 3] = 255;
+            }
+        }
+    }
+    tauri::image::Image::new_owned(pixels, 36, 36)
+}
+
+#[cfg(target_os = "macos")]
+fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+
+    // The tray reports physical coordinates in its screen's scale, not the window's scale.
+    let monitor = app.available_monitors().ok().and_then(|monitors| {
+        monitors.into_iter().find(|monitor| {
+            let scale = monitor.scale_factor();
+            let point = rect.position.to_logical::<f64>(scale);
+            let origin = monitor.position().to_logical::<f64>(scale);
+            let size = monitor.size().to_logical::<f64>(scale);
+            point.x >= origin.x
+                && point.x < origin.x + size.width
+                && point.y >= origin.y
+                && point.y < origin.y + size.height
+        })
+    });
+    let scale = monitor.as_ref().map_or_else(
+        || window.scale_factor().unwrap_or(1.0),
+        |m| m.scale_factor(),
+    );
+    let tray_position = rect.position.to_logical::<f64>(scale);
+    let tray_size = rect.size.to_logical::<f64>(scale);
+    let window_scale = window.scale_factor().unwrap_or(1.0);
+    let window_size = size.to_logical::<f64>(window_scale);
+    let mut x = tray_position.x + (tray_size.width - window_size.width) / 2.0;
+    let mut y = tray_position.y + tray_size.height + 6.0;
+
+    if let Some(monitor) = monitor {
+        // Tauri's macOS work area comes from NSScreen.visibleFrame.
+        let work_area = monitor.work_area();
+        let origin = work_area.position.to_logical::<f64>(scale);
+        let size = work_area.size.to_logical::<f64>(scale);
+        x = x.clamp(
+            origin.x,
+            (origin.x + size.width - window_size.width).max(origin.x),
+        );
+        y = y.clamp(
+            origin.y,
+            (origin.y + size.height - window_size.height).max(origin.y),
+        );
+    }
+
+    let _ = window.set_position(tauri::LogicalPosition::new(x.round(), y.round()));
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+#[cfg(target_os = "macos")]
+fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
+    PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            show_calendar_below_tray(app, rect);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    if let Some(window) = app.get_webview_window("main") {
+        configure_macos_panel(&window)?;
+    }
+
+    let tray = TrayIconBuilder::with_id("calendar-menu-bar")
+        .icon(menu_bar_icon())
+        .icon_as_template(true)
+        .tooltip("日历")
+        .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click {
+                rect,
+                button,
+                button_state,
+                ..
+            } = event
+            {
+                if button_state == MouseButtonState::Up {
+                    let app = tray.app_handle();
+                    match button {
+                        MouseButton::Left => {
+                            toggle_calendar_below_tray(app, rect);
+                            let _ = app.emit("taskbar-calendar-click", ());
+                        }
+                        MouseButton::Right => {
+                            PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+                            show_calendar_below_tray(app, rect);
+                            let _ = app.emit("taskbar-calendar-context", ());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+
+    tray.build(app)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -188,8 +349,14 @@ fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) ->
     let main_pos = main.outer_position().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
     let main_size = main.outer_size().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
     let (left, top, right, bottom) = if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
-        let pos = monitor.position().to_logical::<f64>(scale);
-        let size = monitor.size().to_logical::<f64>(scale);
+        #[cfg(target_os = "macos")]
+        let (position, size) = (monitor.work_area().position, monitor.work_area().size);
+        #[cfg(not(target_os = "macos"))]
+        let (position, size) = (*monitor.position(), *monitor.size());
+        #[cfg(target_os = "macos")]
+        let scale = monitor.scale_factor();
+        let pos = position.to_logical::<f64>(scale);
+        let size = size.to_logical::<f64>(scale);
         (pos.x, pos.y, pos.x + size.width, pos.y + size.height)
     } else {
         (main_pos.x, main_pos.y, main_pos.x + main_size.width, main_pos.y + main_size.height)
@@ -215,6 +382,8 @@ fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) ->
         .skip_taskbar(true)
         .build()
         .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    configure_macos_panel(&window).map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -334,6 +503,9 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("calendar-desktop"));
             app.manage(AppState::new(dir));
 
+            #[cfg(target_os = "macos")]
+            setup_macos_menu_bar(app)?;
+
             #[cfg(windows)]
             start_mouse_hook(app.handle().clone());
 
@@ -383,12 +555,46 @@ pub fn run() {
                     let _ = window.hide();
                 }
                 tauri::WindowEvent::Focused(false) => {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let generation = PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+                        let window = window.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(120));
+                            let app = window.app_handle().clone();
+                            let _ = app.run_on_main_thread(move || {
+                                if PANEL_FOCUS_GENERATION.load(Ordering::Relaxed) != generation {
+                                    return;
+                                }
+                                let main = window.app_handle().get_webview_window("main");
+                                let aux_focused = ["detail", "clock"].iter().any(|label| {
+                                    window
+                                        .app_handle()
+                                        .get_webview_window(label)
+                                        .is_some_and(|aux| aux.is_focused().unwrap_or(false))
+                                });
+                                if window.label() != "main" && !window.is_focused().unwrap_or(false) {
+                                    let _ = window.hide();
+                                }
+                                if !aux_focused {
+                                    if let Some(main) = main {
+                                        if !main.is_focused().unwrap_or(false) {
+                                            let _ = main.hide();
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
                     let aux_visible = ["detail", "clock"].iter().any(|label| {
                         window.app_handle().get_webview_window(label)
                             .is_some_and(|aux| aux.is_visible().unwrap_or(false))
                     });
                     if window.label() != "main" || !aux_visible {
                         let _ = window.hide();
+                    }
                     }
                 }
                 _ => {}

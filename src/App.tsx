@@ -218,6 +218,10 @@ function CalendarApp() {
       setContextMenu(true);
       setShowSettings(false);
     }).then((dispose) => disposers.push(dispose));
+    listen("open-settings", () => {
+      setContextMenu(false);
+      setShowSettings(true);
+    }).then((dispose) => disposers.push(dispose));
     return () => disposers.forEach((dispose) => dispose());
   }, []);
 
@@ -272,7 +276,7 @@ function CalendarApp() {
             <div><p className="eyebrow">CALENDAR SETTINGS</p><h2>设置</h2></div>
             <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
           </div>
-          <p className="settings-description">日历面板由 Windows 任务栏右下角时间控件触发。</p>
+          <p className="settings-description">日历面板可由 Windows 任务栏时间控件或 macOS 菜单栏图标触发。</p>
           <div className="settings-section">
             <span className="section-label">外观</span>
             <div className="theme-options">
