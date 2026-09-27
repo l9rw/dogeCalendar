@@ -194,7 +194,9 @@ fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
         // during the activation change from the full-screen application.
         (*ns_window).setHidesOnDeactivate(false);
         (*ns_window).setCollectionBehavior(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
+            // A hidden window can remain attached to the desktop Space even when
+            // shown from a full-screen app. Move it to the Space being activated.
+            NSWindowCollectionBehavior::MoveToActiveSpace
                 | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::FullScreenAuxiliary,
         );
@@ -204,21 +206,21 @@ fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn menu_bar_icon() -> tauri::image::Image<'static> {
-    // A monochrome 18pt calendar at 2x, with transparent pixels for AppKit's template tint.
-    let mut pixels = vec![0; 36 * 36 * 4];
-    for y in 0..36 {
-        for x in 0..36 {
-            let outline = (x == 3 || x == 32) && (6..=33).contains(&y)
-                || (y == 6 || y == 33 || y == 15) && (3..=32).contains(&x);
-            let ring = (y >= 2 && y <= 9) && ((9..=11).contains(&x) || (24..=26).contains(&x));
-            let date = (19..=27).contains(&y) && ((9..=14).contains(&x) || (21..=26).contains(&x));
+    // Draw at 2x the 22pt status-item size to keep the edges sharp on Retina displays.
+    let mut pixels = vec![0; 44 * 44 * 4];
+    for y in 0..44 {
+        for x in 0..44 {
+            let outline = (x == 2 || x == 41) && (7..=41).contains(&y)
+                || (y == 7 || y == 41 || y == 18) && (2..=41).contains(&x);
+            let ring = (y <= 12) && ((10..=13).contains(&x) || (30..=33).contains(&x));
+            let date = (23..=35).contains(&y) && ((10..=17).contains(&x) || (26..=33).contains(&x));
             if outline || ring || date {
-                let index = (y * 36 + x) * 4;
+                let index = (y * 44 + x) * 4;
                 pixels[index + 3] = 255;
             }
         }
     }
-    tauri::image::Image::new_owned(pixels, 36, 36)
+    tauri::image::Image::new_owned(pixels, 44, 44)
 }
 
 #[cfg(target_os = "macos")]
@@ -231,7 +233,7 @@ fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
     use objc2_foundation::{NSAttributedString, NSAttributedStringKey, NSDictionary, NSString};
 
     let today = Local::now();
-    const SIZE: usize = 36;
+    const SIZE: usize = 44;
     let rep = unsafe {
         NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
             NSBitmapImageRep::alloc(), std::ptr::null_mut(), SIZE as isize, SIZE as isize, 8, 4, true, false,
@@ -247,7 +249,7 @@ fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
     NSColor::whiteColor().setFill();
     NSBezierPath::fillRect(objc2_foundation::NSRect::new(
         objc2_foundation::NSPoint::new(1.0, 1.0),
-        objc2_foundation::NSSize::new(34.0, 34.0),
+        objc2_foundation::NSSize::new(42.0, 42.0),
     ));
 
     let draw_line = |text: &str, font_size: f64, bottom: f64| {
@@ -265,11 +267,11 @@ fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
     };
 
     match style {
-        MenuBarStyle::Date => draw_line(&today.day().to_string(), 29.0, 1.0),
+        MenuBarStyle::Date => draw_line(&today.day().to_string(), 32.0, 2.0),
         MenuBarStyle::WeekdayDate => {
             let weekday = ["日", "一", "二", "三", "四", "五", "六"][today.weekday().num_days_from_sunday() as usize];
-            draw_line(&format!("周{weekday}"), 15.0, 18.0);
-            draw_line(&today.day().to_string(), 21.0, 0.0);
+            draw_line(&format!("周{weekday}"), 18.0, 22.0);
+            draw_line(&today.day().to_string(), 22.0, 0.0);
         }
         MenuBarStyle::Calendar => unreachable!(),
     }
@@ -285,11 +287,27 @@ fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
 }
 
 #[cfg(target_os = "macos")]
+fn enlarge_menu_bar_icon(tray: &tauri::tray::TrayIcon) -> tauri::Result<()> {
+    use objc2::MainThreadMarker;
+    use objc2_foundation::NSSize;
+
+    // tray-icon sets NSImage to 18pt on every update; display the 44px bitmap at 2x.
+    tray.with_inner_tray_icon(|inner| {
+        let Some(item) = inner.ns_status_item() else { return };
+        let Some(button) = item.button(MainThreadMarker::new().expect("menu bar requires main thread")) else { return };
+        if let Some(image) = button.image() {
+            image.setSize(NSSize::new(22.0, 22.0));
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn update_menu_bar_icon(app: &tauri::AppHandle, style: MenuBarStyle) -> Result<(), String> {
     let tray = app.tray_by_id("calendar-menu-bar").ok_or("菜单栏图标不可用")?;
     let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
     tray.set_icon_with_as_template(Some(icon), style == MenuBarStyle::Calendar)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    enlarge_menu_bar_icon(&tray).map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -449,7 +467,8 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
             }
         });
 
-    tray.build(app)?;
+    let tray = tray.build(app)?;
+    enlarge_menu_bar_icon(&tray)?;
     let handle = app.handle().clone();
     std::thread::spawn(move || {
         let mut date = Local::now().date_naive();
@@ -479,15 +498,9 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn show_update_panel(app: tauri::AppHandle) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("日历窗口不可用")?;
-    if !window.is_visible().map_err(|error| error.to_string())? {
-        window.center().map_err(|error| error.to_string())?;
-    }
+    window.center().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "macos")]
-    if let Ok(ns_window) = window.ns_window() {
-        unsafe { (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless() };
-    }
     Ok(())
 }
 
