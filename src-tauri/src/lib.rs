@@ -3,6 +3,10 @@ use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
+use chrono::{Datelike, Local};
+#[cfg(target_os = "macos")]
+use domain::MenuBarStyle;
+#[cfg(target_os = "macos")]
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::{Effect, EffectsBuilder},
@@ -218,6 +222,87 @@ fn menu_bar_icon() -> tauri::image::Image<'static> {
 }
 
 #[cfg(target_os = "macos")]
+fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
+    use objc2::{runtime::AnyObject, AnyThread};
+    use objc2_app_kit::{
+        NSBitmapImageRep, NSColor, NSDeviceRGBColorSpace, NSFont, NSFontAttributeName,
+        NSForegroundColorAttributeName, NSGraphicsContext, NSAttributedStringNSStringDrawing,
+    };
+    use objc2_foundation::{NSAttributedString, NSAttributedStringKey, NSDictionary, NSString};
+
+    let today = Local::now();
+    let rep = unsafe {
+        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(), std::ptr::null_mut(), 36, 36, 8, 4, true, false,
+            NSDeviceRGBColorSpace, 0, 0,
+        )
+    }.expect("failed to create menu bar image");
+    let bytes_per_row = rep.bytesPerRow() as usize;
+    unsafe { std::slice::from_raw_parts_mut(rep.bitmapData(), bytes_per_row * 36) }.fill(0);
+    let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)
+        .expect("failed to create menu bar drawing context");
+    NSGraphicsContext::saveGraphicsState_class();
+    NSGraphicsContext::setCurrentContext(Some(&context));
+
+    let draw_line = |text: &str, font_size: f64, bottom: f64| {
+        let font = NSFont::boldSystemFontOfSize(font_size);
+        let color = NSColor::blackColor();
+        let keys: [&NSAttributedStringKey; 2] = unsafe { [NSFontAttributeName, NSForegroundColorAttributeName] };
+        let values: [&AnyObject; 2] = [font.as_ref(), color.as_ref()];
+        let attributes = NSDictionary::from_slices(&keys, &values);
+        let string = NSString::from_str(text);
+        let line = unsafe { NSAttributedString::initWithString_attributes(
+            NSAttributedString::alloc(), &string, Some(&attributes),
+        ) };
+        let size = line.size();
+        line.drawAtPoint(objc2_foundation::NSPoint::new((36.0 - size.width) / 2.0, bottom));
+    };
+
+    match style {
+        MenuBarStyle::Date => draw_line(&today.day().to_string(), 24.0, 4.0),
+        MenuBarStyle::WeekdayDate => {
+            let weekday = ["日", "一", "二", "三", "四", "五", "六"][today.weekday().num_days_from_sunday() as usize];
+            draw_line(&format!("周{weekday}"), 12.0, 19.0);
+            draw_line(&today.day().to_string(), 17.0, 0.0);
+        }
+        MenuBarStyle::Calendar => unreachable!(),
+    }
+
+    NSGraphicsContext::restoreGraphicsState_class();
+    let mut pixels = vec![0; 36 * 36 * 4];
+    let bitmap = rep.bitmapData();
+    for row in 0..36 {
+        let source = unsafe { std::slice::from_raw_parts(bitmap.add(row * bytes_per_row), 36 * 4) };
+        for (pixel, rgba) in source.chunks_exact(4).enumerate() {
+            let index = (row * 36 + pixel) * 4;
+            pixels[index + 3] = rgba[3];
+        }
+    }
+    tauri::image::Image::new_owned(pixels, 36, 36)
+}
+
+#[cfg(target_os = "macos")]
+fn update_menu_bar_icon(app: &tauri::AppHandle, style: MenuBarStyle) -> Result<(), String> {
+    let tray = app.tray_by_id("calendar-menu-bar").ok_or("菜单栏图标不可用")?;
+    let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
+    tray.set_icon(Some(icon)).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn menu_bar_style_get(state: tauri::State<'_, AppState>) -> MenuBarStyle {
+    state.store.data.lock().expect("store mutex poisoned").menu_bar_style
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn menu_bar_style_set(app: tauri::AppHandle, state: tauri::State<'_, AppState>, style: MenuBarStyle) -> Result<(), String> {
+    update_menu_bar_icon(&app, style)?;
+    state.store.with(|data| data.menu_bar_style = style);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
     let Some(window) = app.get_webview_window("main") else {
         #[cfg(debug_assertions)]
@@ -325,8 +410,10 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
         configure_macos_panel(&window)?;
     }
 
+    let style = app.state::<AppState>().store.data.lock().expect("store mutex poisoned").menu_bar_style;
+    let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
     let tray = TrayIconBuilder::with_id("calendar-menu-bar")
-        .icon(menu_bar_icon())
+        .icon(icon)
         .icon_as_template(true)
         .tooltip("日历")
         .on_tray_icon_event(move |tray, event| {
@@ -359,6 +446,24 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
         });
 
     tray.build(app)?;
+    let handle = app.handle().clone();
+    std::thread::spawn(move || {
+        let mut date = Local::now().date_naive();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let today = Local::now().date_naive();
+            if today != date {
+                date = today;
+                let app = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    let style = app.state::<AppState>().store.data.lock().expect("store mutex poisoned").menu_bar_style;
+                    if style != MenuBarStyle::Calendar {
+                        let _ = update_menu_bar_icon(&app, style);
+                    }
+                });
+            }
+        }
+    });
     Ok(())
 }
 
@@ -441,78 +546,118 @@ fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
     Ok(())
 }
 
-fn huangli_pick<'a>(obj: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
-    for key in keys {
-        if let Some(value) = obj.get(*key).and_then(|v| v.as_str()) {
-            if !value.is_empty() {
-                return Some(value);
-            }
-        }
-    }
-    None
-}
-
 fn huangli_split_list(value: &str) -> Vec<String> {
     value
-        .split(['，', ',', '、', ' ', '/'])
+        .split(['.', '，', ',', '、', ' ', '/'])
         .map(|item| item.trim().to_string())
         .filter(|item| !item.is_empty())
         .collect()
 }
 
-fn huangli_normalize(data: &serde_json::Value, source: &str) -> serde_json::Value {
-    let yi = huangli_pick(data, &["y", "yi", "suit", "宜"]).unwrap_or("");
-    let ji = huangli_pick(data, &["j", "ji", "avoid", "忌"]).unwrap_or("");
-    serde_json::json!({
+fn huangli_normalize(json: &serde_json::Value, date: &str, source: &str) -> Option<serde_json::Value> {
+    if json["code"].as_i64() != Some(200) || json["data"]["solar"]["full"].as_str() != Some(date) {
+        return None;
+    }
+    let data = &json["data"];
+    let yi = data["taboo"]["day"]["recommends"].as_str()?;
+    let ji = data["taboo"]["day"]["avoids"].as_str()?;
+    if yi.is_empty() && ji.is_empty() {
+        return None;
+    }
+    let ganzhi = ["year", "month", "day"]
+        .iter()
+        .filter_map(|part| data["sixty_cycle"][*part]["name"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(serde_json::json!({
         "source": source,
-        "lunar": huangli_pick(data, &["lunar", "nongli", "lunarCalendar"]).unwrap_or(""),
-        "ganzhi": huangli_pick(data, &["luna", "ganzhi", "ganZhi", "lunarGanZhi"]).unwrap_or(""),
-        "week": huangli_pick(data, &["week", "weekday", "weeks"]).unwrap_or(""),
-        "xingzuo": huangli_pick(data, &["xingzuo", "star", "constellation"]).unwrap_or(""),
-        "shengxiao": huangli_pick(data, &["shengxiao", "zodiac", "animals"]).unwrap_or(""),
-        "festival": huangli_pick(data, &["jieri", "festival", "holiday"]).unwrap_or(""),
-        "jieqi": huangli_pick(data, &["suicide", "jieqi", "solarTerm", "jq"]).unwrap_or(""),
+        "lunar": data["lunar"]["desc_short"].as_str().unwrap_or(""),
+        "ganzhi": ganzhi,
+        "week": data["solar"]["week_desc"].as_str().unwrap_or(""),
+        "xingzuo": data["constellation"]["name"].as_str().unwrap_or(""),
+        "shengxiao": data["zodiac"]["year"].as_str().unwrap_or(""),
+        "festival": data["festival"]["both_desc"].as_str()
+            .or_else(|| data["legal_holiday"]["name"].as_str()).unwrap_or(""),
+        "jieqi": data["term"]["today"]["name"].as_str().unwrap_or(""),
         "yi": huangli_split_list(yi),
         "ji": huangli_split_list(ji),
-        "pengsheng": huangli_pick(data, &["pengsheng", "pengzu", "pz"]).unwrap_or(""),
-        "baiji": huangli_pick(data, &["baiji", "bj"]).unwrap_or(""),
-        "zhushen": huangli_pick(data, &["zhushen", "zh", "valueGod"]).unwrap_or(""),
-        "taishen": huangli_pick(data, &["taishen", "ts", "fetalGod"]).unwrap_or(""),
-    })
+        "pengsheng": "",
+        "baiji": "",
+        "zhushen": "",
+        "taishen": "",
+    }))
 }
 
-fn huangli_request(agent: &ureq::Agent, url: &str) -> Option<serde_json::Value> {
+fn huangli_request(agent: &ureq::Agent, url: &str, date: &str, source: &str) -> Option<serde_json::Value> {
     let response = agent.get(url).call().ok()?;
     let json: serde_json::Value = response.into_json().ok()?;
-    if let Some(data) = json.get("data") {
-        if data.is_object() {
-            return Some(data.clone());
-        }
-    }
-    if json.is_object() && (json.get("y").is_some() || json.get("yi").is_some() || json.get("j").is_some()) {
-        return Some(json);
-    }
-    None
+    huangli_normalize(&json, date, source)
 }
 
 #[tauri::command]
 fn fetch_huangli(date: String) -> Result<serde_json::Value, String> {
+    let parsed = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+        .map_err(|_| "日期格式无效".to_string())?;
+    if parsed.format("%Y-%m-%d").to_string() != date {
+        return Err("日期格式无效".into());
+    }
     let agent = ureq::AgentBuilder::new()
         .user_agent("Calendar/0.1.0")
         .timeout(std::time::Duration::from_secs(8))
         .build();
 
-    let vvhan = format!("https://api.vvhan.com/api/huangli/date?date={}", date);
-    if let Some(data) = huangli_request(&agent, &vvhan) {
-        return Ok(huangli_normalize(&data, "vvhan"));
-    }
-
-    let oioweb = format!("https://api.oioweb.cn/api/common/huangli?date={}", date);
-    if let Some(data) = huangli_request(&agent, &oioweb) {
-        return Ok(huangli_normalize(&data, "oioweb"));
+    for (host, source) in [("60s.viki.moe", "60s"), ("60s.7se.cn", "60s mirror")] {
+        let url = format!("https://{host}/v2/lunar?date={date}");
+        if let Some(data) = huangli_request(&agent, &url, &date, source) {
+            return Ok(data);
+        }
     }
 
     Err(format!("黄历接口暂时不可用: {}", date))
+}
+
+#[cfg(test)]
+mod huangli_tests {
+    use super::*;
+
+    #[test]
+    fn maps_60s_daily_data() {
+        let json = serde_json::json!({
+            "code": 200,
+            "data": {
+                "solar": { "full": "2026-09-27", "week_desc": "星期日" },
+                "lunar": { "desc_short": "农历丙午年八月十七" },
+                "sixty_cycle": { "year": { "name": "丙午年" }, "month": { "name": "丁酉月" }, "day": { "name": "甲辰日" } },
+                "taboo": { "day": { "recommends": "嫁娶.纳采", "avoids": "开市.安葬" } }
+            }
+        });
+        let result = huangli_normalize(&json, "2026-09-27", "60s").unwrap();
+        assert_eq!(result["yi"], serde_json::json!(["嫁娶", "纳采"]));
+        assert_eq!(result["ji"], serde_json::json!(["开市", "安葬"]));
+        assert_eq!(result["ganzhi"], "丙午年 丁酉月 甲辰日");
+        assert_eq!(result["lunar"], "农历丙午年八月十七");
+        assert_eq!(result["source"], "60s");
+    }
+
+    #[test]
+    fn rejects_failed_or_wrong_date_responses() {
+        let json = serde_json::json!({
+            "code": 200,
+            "data": { "solar": { "full": "2026-03-02" }, "taboo": { "day": { "recommends": "祭祀", "avoids": "出行" } } }
+        });
+        assert!(huangli_normalize(&json, "2026-02-30", "60s").is_none());
+        assert!(huangli_normalize(&serde_json::json!({ "code": 429, "data": json["data"] }), "2026-03-02", "60s").is_none());
+        assert!(huangli_normalize(&serde_json::json!({
+            "code": 200,
+            "data": { "solar": { "full": "2026-03-02" }, "taboo": { "day": { "recommends": "", "avoids": "" } } }
+        }), "2026-03-02", "60s").is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_dates_before_request() {
+        assert!(fetch_huangli("2026-02-30".into()).is_err());
+        assert!(fetch_huangli("2026-9-27".into()).is_err());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -520,6 +665,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(target_os = "macos")]
+            menu_bar_style_get,
+            #[cfg(target_os = "macos")]
+            menu_bar_style_set,
             quit_app,
             open_aux_panel,
             close_aux_panel,

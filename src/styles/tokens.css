@@ -20,7 +20,6 @@
   --shell-border: #d9e8ff;
   --shadow: 0 4px 16px rgba(83, 125, 201, .04);
   --shadow-panel: 0 14px 32px rgba(44, 59, 78, .07);
-  --weekend-bg: #f4f6fb;
   --holiday-bg: #fff5f5;
   --workday-bg: #f2f5ff;
   --work-mark-bg: #4a5a86;
@@ -46,7 +45,6 @@
   --shell-border: #2a2f38;
   --shadow: 0 4px 16px rgba(0, 0, 0, .35);
   --shadow-panel: 0 14px 32px rgba(0, 0, 0, .45);
-  --weekend-bg: #1d2129;
   --holiday-bg: #2a1f24;
   --workday-bg: #1d2230;
   --work-mark-bg: #3a4670;
@@ -169,7 +167,6 @@ button { font: inherit; }
 .weekend-heading { color: var(--red); }
 .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); flex: 1; }
 .day-cell { position: relative; min-height: 48px; padding: 4px 2px; border: 0; border-radius: 10px; color: var(--text); background: transparent; cursor: pointer; }
-.day-cell.weekend { background: var(--weekend-bg); }
 .day-cell:hover { background: var(--surface-3); }
 .day-cell.muted { color: var(--text-faint); }
 .day-cell.weekend:not(.muted) .solar-day { color: var(--red); }

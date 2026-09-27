@@ -24,6 +24,7 @@ type CalendarDay = {
 const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 type CalendarView = "month" | "year";
 type ThemeMode = "light" | "dark" | "system";
+type MenuBarStyle = "calendar" | "date" | "weekday_date";
 const THEME_KEY = "calendar-theme";
 
 export function resolveTheme(mode: ThemeMode, systemDark: boolean): "light" | "dark" {
@@ -174,6 +175,7 @@ export function App() {
 }
 
 function CalendarApp() {
+  const isMac = document.documentElement.dataset.platform === "macos";
   const now = new Date();
   const [cursor, setCursor] = useState(new Date(2026, 8, 1));
   const [selected, setSelected] = useState(now);
@@ -181,6 +183,7 @@ function CalendarApp() {
   const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
+  const [menuBarStyle, setMenuBarStyle] = useState<MenuBarStyle>("calendar");
   const [manualLat, setManualLat] = useState("");
   const [manualLon, setManualLon] = useState("");
   const [manualLabel, setManualLabel] = useState("");
@@ -189,6 +192,24 @@ function CalendarApp() {
   const clearWeatherCache = useInfoStore((state) => state.clearWeatherCache);
   const { mode: themeMode, changeTheme } = useThemeMode();
   const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+
+  useEffect(() => {
+    if (!isMac) return;
+    let active = true;
+    void invoke<MenuBarStyle>("menu_bar_style_get").then((style) => {
+      if (active) setMenuBarStyle(style);
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [isMac]);
+
+  const changeMenuBarStyle = async (style: MenuBarStyle) => {
+    try {
+      await invoke("menu_bar_style_set", { style });
+      setMenuBarStyle(style);
+    } catch (error) {
+      console.error("无法更新菜单栏图标", error);
+    }
+  };
 
   const moveMonth = (offset: number) => {
     setCursor((value) => new Date(value.getFullYear(), value.getMonth() + offset, 1));
@@ -266,6 +287,7 @@ function CalendarApp() {
         <div className="taskbar-context-menu" role="menu">
           <button role="menuitem" onClick={() => setContextMenu(false)}>打开日历</button>
           <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>设置</button>
+          {isMac && <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>标题栏设置</button>}
           <button role="menuitem" onClick={() => invoke("quit_app")}>退出</button>
         </div>
       ) : showSettings ? (
@@ -287,6 +309,17 @@ function CalendarApp() {
               ))}
             </div>
           </div>
+          {isMac && <div className="settings-section">
+            <span className="section-label">标题栏设置</span>
+            <div className="theme-options">
+              {([ ["calendar", "日历图标", "默认图标"], ["date", "显示当天的日期", "菜单栏显示今日日期"], ["weekday_date", "周几 + 日期", "上面显示周几，下面显示日期"] ] as const).map(([value, label, desc]) => (
+                <button key={value} className={`theme-option ${menuBarStyle === value ? "active" : ""}`} aria-pressed={menuBarStyle === value} onClick={() => void changeMenuBarStyle(value)}>
+                  <span className="theme-label">{label}</span>
+                  <span className="theme-desc">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>}
           <div className="settings-section">
             <span className="section-label">位置与天气</span>
             <p className="settings-description">手动设置坐标会覆盖 IP 定位；清除后会重新使用 IP 兜底。</p>
@@ -398,6 +431,14 @@ function CalendarApp() {
                     <span className="toolbar-menu-check" />
                     <span>世界时钟</span>
                   </button>
+                  {isMac && <button
+                    role="menuitem"
+                    className="toolbar-menu-item"
+                    onClick={() => { setShowSettings(true); setShowToolbarMenu(false); }}
+                  >
+                    <span className="toolbar-menu-check" />
+                    <span>标题栏设置</span>
+                  </button>}
                 </div>
               </>
             )}

@@ -4,36 +4,30 @@ A lightweight cross-platform desktop calendar built with Tauri 2, React and Type
 
 [简体中文](./README.zh-CN.md)
 
-The goal is a calendar panel suited to the Windows system tray or the macOS menu bar, supporting month view, year view, the Chinese lunar calendar, the twenty-four solar terms, statutory holidays and adjusted rest days, world time, and weather capabilities. The repository is currently in an early prototype iteration: a basic month view and tray interaction are in place, and additional domain data and platform capabilities are being integrated incrementally.
+The app provides a calendar panel opened from the Windows taskbar clock or macOS menu bar. It includes a month view, Chinese lunar dates, holiday labels, world clocks, weather, and a date-detail panel. It is still a prototype; some calendar data is approximate or incomplete.
 
 ## Current status
 
 Implemented:
 
-- Tauri 2 desktop window and system tray icon
-- Tray left-click to show/hide the calendar window
-- Open calendar, settings and quit actions from the tray menu
-- Fixed 7-column × 6-row month grid
-- Previous month, next month and back to today
-- Date selection and date detail panel
+- Tauri 2 desktop panels opened from the Windows taskbar clock or macOS menu bar icon
+- Fixed 7-column × 6-row month grid with month/year selection and a Today shortcut
+- Date selection and a separate detail panel with online Chinese almanac data
 - Current date highlight
-- Simple lunar text and solar-term placeholder display
-- Follows the system light/dark theme, with a manual theme toggle
-- Settings panel entry
-- Hide to tray on window close instead of quitting the app
+- Lunar dates via the browser's Chinese calendar, approximate solar-term dates, and built-in holiday labels and limited 2026 rest/workday overrides
+- Searchable world clocks with 12/24-hour display and saved city choices
+- Current weather from Open-Meteo, IP-based location fallback, manual coordinates, and a clearable weather cache
+- System, light, and dark themes; settings panel and macOS menu bar icon styles
+- Hide the panel on close instead of quitting the app
 - Transparent, frameless window with skip-taskbar configuration
 - Responsive layout for small screens and mobile widths
 
 Planned:
 
 - Year view
-- Complete lunar calendar and leap-month calculation from 1900 to 2100
-- Solar-term data
-- Statutory holiday, adjusted rest and user override data
-- World time, timezone lookup and sorting
-- System location and a weather provider
-- SQLite for settings, events and caching
-- Windows tray positioning and macOS menu bar panel adaptation
+- Complete validated lunar, solar-term, and annual statutory holiday/adjusted-workday data
+- User holiday overrides and events
+- SQLite storage (current settings and caches use a local JSON file)
 - Autostart, system calendar, notifications and cloud sync
 
 ## Tech stack
@@ -43,7 +37,7 @@ Planned:
 - [TypeScript](https://www.typescriptlang.org/) — type-safe frontend development
 - [Vite](https://vite.dev/) — dev server and frontend build
 - [Rust](https://www.rust-lang.org/) — Tauri native layer
-- [Zustand](https://zustand.docs.pmnd.rs/) — frontend state dependency, later used to extend cross-component state
+- [Zustand](https://zustand.docs.pmnd.rs/) — frontend state for world clocks, location and weather
 
 ## Prerequisites
 
@@ -113,7 +107,7 @@ This is handy for quickly inspecting the React UI, but it does not launch the Ta
    npm run tauri:dev
    ```
 
-The main window starts hidden. Use the macOS **menu bar status icon** (not the window's title-bar controls): left-click to toggle the calendar panel beneath the icon; clicking outside dismisses it. Right-click for Open calendar, Settings, and Quit. The app has no Dock icon, so quit via the right-click menu or press `Ctrl+C` in the dev terminal. Browser-only `npm run dev` does not provide a menu bar icon.
+The main window starts hidden. Use the macOS **menu bar status icon** (not the window's title-bar controls): left-click to toggle the calendar panel beneath the icon; clicking outside dismisses it. Right-click to open the app's context menu, including Settings and Quit. The app has no Dock icon, so quit through the app menu or press `Ctrl+C` in the dev terminal. Browser-only `npm run dev` does not provide a menu bar icon.
 
 The Tauri dev URL is `http://localhost:1420`. Run `npm run tauri:build` to bundle the macOS app. This project enables `macOSPrivateApi` for transparent windows; builds using this private API cannot be submitted to the Mac App Store.
 
@@ -125,7 +119,7 @@ After installing the platform prerequisites, start dev mode with the native wind
 npm run tauri:dev
 ```
 
-The main window starts hidden in dev mode and can be reopened through the platform's entry point.
+The main window starts hidden in dev mode. On Windows, click the taskbar clock to toggle it, or right-click for the app's context menu.
 
 ## Build
 
@@ -163,16 +157,22 @@ Build artifacts are emitted to the Tauri bundle directory under `src-tauri/targe
 ## Project structure
 
 ```text
-calendar/
+dogeCalendar/
 ├── src/
-│   ├── App.tsx               # Current calendar main interface
+│   ├── App.tsx               # Calendar, settings and date-detail UI
+│   ├── components/           # Weather and world clock panels
+│   ├── services/             # Calendar data and Tauri IPC
+│   ├── stores/               # Frontend information state
 │   ├── main.tsx              # React entry
 │   └── styles/
-│       └── tokens.css         # Theme tokens, layout and responsive styles
+│       └── tokens.css        # Theme tokens, layout and responsive styles
 ├── src-tauri/
 │   ├── src/
-│   │   ├── lib.rs             # Tauri app, tray and window behavior
-│   │   └── main.rs            # Native app entry
+│   │   ├── lib.rs             # Tauri app and platform window behavior
+│   │   ├── commands/         # IPC commands
+│   │   ├── providers/        # Network providers
+│   │   ├── services/         # Storage, weather, location and time
+│   │   └── main.rs           # Native app entry
 │   ├── capabilities/         # Tauri permission config
 │   ├── icons/                 # App icons
 │   ├── Cargo.toml             # Rust dependencies and crate config
@@ -184,33 +184,31 @@ calendar/
 
 ## Current interactions
 
-- Click a date cell to view date details and auto-jump to the corresponding month.
-- Use the prev/next arrows to switch months.
-- Click "Today" to return to the current date.
-- Click the theme button in the top-right corner to switch light/dark mode.
-- Click "Settings" to open the settings panel; the tray menu can also open settings.
-- On window close the app hides to the system tray and can be reopened via the tray icon.
+- Click a date cell to open its detail panel and jump to its month.
+- Use the arrows or month/year selectors to navigate; the Today button returns to the current date.
+- Open the world clock from the More menu. Set theme, location and weather options in Settings.
+- Closing the panel hides it; reopen it with the Windows taskbar clock or macOS menu bar icon.
 
 ## Architecture direction
 
-The current frontend prototype lives in `src/App.tsx`, and the native tray logic lives in `src-tauri/src/lib.rs`. It will be split into the following layers step by step:
+The UI is centered in `src/App.tsx`, with calendar data in `src/services/calendarData.ts` and native window behavior in `src-tauri/src/lib.rs`. Other services are split as follows:
 
 ```text
 React UI
   -> Zustand stores / Tauri IPC
 Rust application services
-  -> calendar core / lunar / holiday / weather / location / storage
+  -> world time / weather / location / JSON storage
 Platform adapters
   -> Windows tray + popup positioning
   -> macOS NSStatusItem + NSPanel positioning
 ```
 
-Business calculations, data aggregation, caching and external requests will be placed in the Rust layer; the frontend is responsible for presentation and interaction; Windows and macOS system APIs are isolated through a platform adapter layer.
+World clocks, weather, location, caching and external requests use the Rust layer; calendar labels are currently calculated in the frontend. Platform-specific window behavior lives in the native layer.
 
 ## Privacy and data notes
 
-The current prototype does not include location, weather or remote holiday requests, and it does not actively collect user data. When network capabilities are added later, requests are planned to be initiated by Rust, with necessary API keys kept in the native layer, and options for location, weather and cache clearing provided.
+Opening date details requests almanac data for the selected date from `60s.viki.moe` (or `60s.7se.cn` as a fallback). The weather panel requests IP-based location from `ipwho.is`, `ipinfo.io` or `freeipapi.com`, then sends coordinates to Open-Meteo for current weather. These are third-party services; the IP-based location providers receive your IP address as part of the request. Setting manual coordinates avoids the IP-location lookup while using the saved location, but weather requests still send coordinates to Open-Meteo. The app saves location, weather cache and world clock preferences in a JSON file in the platform's app-data directory. Settings can clear the saved location and weather cache. No account or cloud sync is implemented.
 
 ## License
 
-The project does not yet declare a formal open-source license.
+This project is licensed under the [Apache License 2.0](./LICENSE). You may use, modify and distribute it under the terms of that license; see `LICENSE` for the full text and redistribution requirements.

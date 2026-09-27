@@ -32,7 +32,7 @@ jobs:
       - name: Check release version
         shell: bash
         run: |
-          node -e 'const version = require("./src-tauri/tauri.conf.json").version; if (process.env.GITHUB_REF_NAME !== `v${version}` || require("./package.json").version !== version) { throw new Error(`Tag and app versions must match: expected v${version}`); }'
+          node -e 'const version = require("./src-tauri/tauri.conf.json").version; const tags = [`v${version}`, `v${version.replace(/\.0$/, "")}`]; if (!tags.includes(process.env.GITHUB_REF_NAME) || require("./package.json").version !== version) { throw new Error(`Tag and app versions must match: expected ${tags.join(" or ")}`); }'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

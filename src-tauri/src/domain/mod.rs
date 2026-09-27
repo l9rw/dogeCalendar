@@ -55,6 +55,16 @@ pub struct WeatherReport {
     pub stale: bool,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MenuBarStyle {
+    #[default]
+    Calendar,
+    Date,
+    WeekdayDate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StoreData {
     pub world_clocks: Vec<WorldClockConfig>,
@@ -68,8 +78,26 @@ pub struct StoreData {
     pub weather_failures: u32,
     #[serde(default)]
     pub last_weather_attempt: Option<i64>,
+    #[cfg(target_os = "macos")]
+    #[serde(default)]
+    pub menu_bar_style: MenuBarStyle,
 }
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{MenuBarStyle, StoreData};
+
+    #[test]
+    fn menu_bar_style_defaults_for_existing_store() {
+        let old: StoreData = serde_json::from_str(r#"{"world_clocks":[]}"#).unwrap();
+        assert_eq!(old.menu_bar_style, MenuBarStyle::Calendar);
+
+        let selected: StoreData = serde_json::from_str(r#"{"world_clocks":[],"menu_bar_style":"weekday_date"}"#).unwrap();
+        assert_eq!(selected.menu_bar_style, MenuBarStyle::WeekdayDate);
+        assert!(serde_json::to_string(&selected).unwrap().contains("weekday_date"));
+    }
 }
