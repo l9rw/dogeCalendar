@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCalendarMeta, dateKey } from "./services/calendarData";
 import { fetchHuangli, type Huangli } from "./services/huangli";
 import { useInfoStore } from "./stores/infoStore";
@@ -26,6 +28,10 @@ type CalendarView = "month" | "year";
 type ThemeMode = "light" | "dark" | "system";
 type MenuBarStyle = "calendar" | "date" | "weekday_date";
 const THEME_KEY = "calendar-theme";
+const IGNORED_UPDATE_KEY = "calendar-ignored-update";
+const REPOSITORY_URL = "https://github.com/l9rw/dogeCalendar";
+type UpdateCheck = { currentVersion: string; hasRelease: boolean; release: { version: string; url: string } | null };
+let startupUpdateCheck: Promise<UpdateCheck> | undefined;
 
 export function resolveTheme(mode: ThemeMode, systemDark: boolean): "light" | "dark" {
   return mode === "system" ? (systemDark ? "dark" : "light") : mode;
@@ -182,6 +188,11 @@ function CalendarApp() {
   const [view, setView] = useState<CalendarView>("month");
   const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [infoPanel, setInfoPanel] = useState<"update" | "about" | null>(null);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "current" | "unreleased" | "available" | "error">("idle");
+  const [updateRelease, setUpdateRelease] = useState<UpdateCheck["release"]>(null);
+  const [updateError, setUpdateError] = useState("");
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
   const [menuBarStyle, setMenuBarStyle] = useState<MenuBarStyle>("calendar");
   const [manualLat, setManualLat] = useState("");
@@ -192,6 +203,48 @@ function CalendarApp() {
   const clearWeatherCache = useInfoStore((state) => state.clearWeatherCache);
   const { mode: themeMode, changeTheme } = useThemeMode();
   const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+
+  useEffect(() => {
+    void getVersion().then(setAppVersion).catch(console.error);
+    let active = true;
+    startupUpdateCheck ??= invoke<UpdateCheck>("check_for_updates");
+    void startupUpdateCheck.then(async ({ release, currentVersion }) => {
+      if (active) setAppVersion(currentVersion);
+      if (!active || !release || localStorage.getItem(IGNORED_UPDATE_KEY) === release.version) return;
+      setUpdateRelease(release);
+      setUpdateStatus("available");
+      setShowSettings(false);
+      setContextMenu(false);
+      setInfoPanel("update");
+      await invoke("show_update_panel");
+    }).catch((error) => console.error("启动时检查更新失败", error));
+    return () => { active = false; };
+  }, []);
+
+  const checkUpdates = async () => {
+    setContextMenu(false);
+    setShowSettings(false);
+    setShowToolbarMenu(false);
+    setInfoPanel("update");
+    setUpdateStatus("checking");
+    setUpdateError("");
+    try {
+      const result = await invoke<UpdateCheck>("check_for_updates");
+      setAppVersion(result.currentVersion);
+      setUpdateRelease(result.release);
+      setUpdateStatus(result.release ? "available" : result.hasRelease ? "current" : "unreleased");
+    } catch (error) {
+      setUpdateStatus("error");
+      setUpdateError(String(error));
+    }
+  };
+
+  const showAbout = () => {
+    setContextMenu(false);
+    setShowSettings(false);
+    setShowToolbarMenu(false);
+    setInfoPanel("about");
+  };
 
   useEffect(() => {
     if (!isMac) return;
@@ -232,13 +285,16 @@ function CalendarApp() {
     listen("taskbar-calendar-click", () => {
       setContextMenu(false);
       setShowSettings(false);
+      setInfoPanel(null);
     }).then((dispose) => disposers.push(dispose));
     listen("taskbar-calendar-context", () => {
       setContextMenu(true);
       setShowSettings(false);
+      setInfoPanel(null);
     }).then((dispose) => disposers.push(dispose));
     listen("open-settings", () => {
       setContextMenu(false);
+      setInfoPanel(null);
       setShowSettings(true);
     }).then((dispose) => disposers.push(dispose));
     return () => disposers.forEach((dispose) => dispose());
@@ -288,8 +344,41 @@ function CalendarApp() {
           <button role="menuitem" onClick={() => setContextMenu(false)}>打开日历</button>
           <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>设置</button>
           {isMac && <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>标题栏设置</button>}
+          <button role="menuitem" onClick={() => void checkUpdates()}>在线更新</button>
+          <button role="menuitem" onClick={showAbout}>关于</button>
           <button role="menuitem" onClick={() => invoke("quit_app")}>退出</button>
         </div>
+      ) : infoPanel ? (
+        <section className="settings-panel info-panel" aria-label={infoPanel === "about" ? "关于" : "在线更新"}>
+          <div className="settings-header">
+            <div><p className="eyebrow">{infoPanel === "about" ? "ABOUT CALENDAR" : "SOFTWARE UPDATE"}</p><h2>{infoPanel === "about" ? "关于" : "在线更新"}</h2></div>
+            <button className="settings-close" aria-label="关闭" onClick={() => setInfoPanel(null)}>×</button>
+          </div>
+          {infoPanel === "about" ? <>
+            <div className="info-app"><img src="/icon.png" alt="" /><div><strong>Calendar</strong><span>版本 {appVersion || "获取中…"}</span></div></div>
+            <p className="settings-description">轻量桌面日历，提供农历、天气与世界时钟。</p>
+            <div className="info-actions">
+              <button className="info-button primary" onClick={() => void checkUpdates()}>检查更新</button>
+              <button className="info-button" onClick={() => void openUrl(REPOSITORY_URL)}>GitHub 仓库</button>
+            </div>
+          </> : <>
+            <p className="settings-description">当前版本：{appVersion || "获取中…"}</p>
+            <div className="update-message" role="status">
+              {updateStatus === "checking" && "正在检查 GitHub 最新发布版本…"}
+              {updateStatus === "current" && "已是最新版本。"}
+              {updateStatus === "unreleased" && "仓库目前没有公开发布的版本。"}
+              {updateStatus === "available" && updateRelease && <><strong>发现新版本 v{updateRelease.version}</strong><span>可前往 GitHub Release 下载并安装更新。</span></>}
+              {updateStatus === "error" && <>检查失败：{updateError}</>}
+              {updateStatus === "idle" && "点击检查更新以获取最新版本。"}
+            </div>
+            <div className="info-actions">
+              {updateStatus === "available" && updateRelease ? <>
+                <button className="info-button primary" onClick={() => void openUrl(updateRelease.url)}>前往更新</button>
+                <button className="info-button" onClick={() => { localStorage.setItem(IGNORED_UPDATE_KEY, updateRelease.version); setInfoPanel(null); }}>忽略此版本</button>
+              </> : <button className="info-button primary" disabled={updateStatus === "checking"} onClick={() => void checkUpdates()}>重新检查</button>}
+            </div>
+          </>}
+        </section>
       ) : showSettings ? (
         <section className="settings-panel" aria-label="设置">
           <div className="settings-header">
@@ -439,6 +528,12 @@ function CalendarApp() {
                     <span className="toolbar-menu-check" />
                     <span>标题栏设置</span>
                   </button>}
+                  <button role="menuitem" className="toolbar-menu-item" onClick={() => void checkUpdates()}>
+                    <span className="toolbar-menu-check" /><span>在线更新</span>
+                  </button>
+                  <button role="menuitem" className="toolbar-menu-item" onClick={showAbout}>
+                    <span className="toolbar-menu-check" /><span>关于</span>
+                  </button>
                 </div>
               </>
             )}

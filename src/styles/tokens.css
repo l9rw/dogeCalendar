@@ -84,6 +84,19 @@ button { font: inherit; }
 .settings-close { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--surface-2); font-size: 22px; cursor: pointer; }
 .settings-close:hover { border-color: var(--blue); }
 .settings-description { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+.info-panel { display: flex; flex-direction: column; }
+.info-app { display: flex; align-items: center; gap: 14px; margin: 38px 0 20px; color: var(--text); }
+.info-app img { width: 54px; height: 54px; border-radius: 12px; }
+.info-app div { display: grid; gap: 5px; }
+.info-app strong { font-size: 18px; }
+.info-app span { color: var(--text-dim); font-size: 13px; }
+.update-message { display: grid; gap: 10px; margin: 36px 0 0; color: var(--text); font-size: 14px; line-height: 1.5; }
+.update-message strong { color: var(--blue); font-size: 18px; }
+.update-message span { color: var(--text-dim); font-size: 13px; }
+.info-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 28px; }
+.info-button { flex: 1; min-height: 38px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); cursor: pointer; font-size: 12px; }
+.info-button.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+.info-button:disabled { opacity: .6; cursor: default; }
 .settings-section { margin-top: 22px; display: grid; gap: 10px; }
 .settings-section .section-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .theme-options { display: grid; gap: 10px; }

@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
+semver = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Variant", "Win32_UI_Accessibility"] }

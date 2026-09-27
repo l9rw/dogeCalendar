@@ -208,10 +208,10 @@ fn menu_bar_icon() -> tauri::image::Image<'static> {
     let mut pixels = vec![0; 36 * 36 * 4];
     for y in 0..36 {
         for x in 0..36 {
-            let outline = (x == 5 || x == 30) && (8..=31).contains(&y)
-                || (y == 8 || y == 31 || y == 16) && (5..=30).contains(&x);
-            let ring = (y >= 4 && y <= 11) && ((10..=12).contains(&x) || (23..=25).contains(&x));
-            let date = (20..=26).contains(&y) && ((10..=14).contains(&x) || (19..=23).contains(&x));
+            let outline = (x == 3 || x == 32) && (6..=33).contains(&y)
+                || (y == 6 || y == 33 || y == 15) && (3..=32).contains(&x);
+            let ring = (y >= 2 && y <= 9) && ((9..=11).contains(&x) || (24..=26).contains(&x));
+            let date = (19..=27).contains(&y) && ((9..=14).contains(&x) || (21..=26).contains(&x));
             if outline || ring || date {
                 let index = (y * 36 + x) * 4;
                 pixels[index + 3] = 255;
@@ -225,24 +225,30 @@ fn menu_bar_icon() -> tauri::image::Image<'static> {
 fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
     use objc2::{runtime::AnyObject, AnyThread};
     use objc2_app_kit::{
-        NSBitmapImageRep, NSColor, NSDeviceRGBColorSpace, NSFont, NSFontAttributeName,
+        NSBezierPath, NSBitmapImageRep, NSColor, NSDeviceRGBColorSpace, NSFont, NSFontAttributeName,
         NSForegroundColorAttributeName, NSGraphicsContext, NSAttributedStringNSStringDrawing,
     };
     use objc2_foundation::{NSAttributedString, NSAttributedStringKey, NSDictionary, NSString};
 
     let today = Local::now();
+    const SIZE: usize = 36;
     let rep = unsafe {
         NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
-            NSBitmapImageRep::alloc(), std::ptr::null_mut(), 36, 36, 8, 4, true, false,
+            NSBitmapImageRep::alloc(), std::ptr::null_mut(), SIZE as isize, SIZE as isize, 8, 4, true, false,
             NSDeviceRGBColorSpace, 0, 0,
         )
     }.expect("failed to create menu bar image");
     let bytes_per_row = rep.bytesPerRow() as usize;
-    unsafe { std::slice::from_raw_parts_mut(rep.bitmapData(), bytes_per_row * 36) }.fill(0);
+    unsafe { std::slice::from_raw_parts_mut(rep.bitmapData(), bytes_per_row * SIZE) }.fill(0);
     let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)
         .expect("failed to create menu bar drawing context");
     NSGraphicsContext::saveGraphicsState_class();
     NSGraphicsContext::setCurrentContext(Some(&context));
+    NSColor::whiteColor().setFill();
+    NSBezierPath::fillRect(objc2_foundation::NSRect::new(
+        objc2_foundation::NSPoint::new(1.0, 1.0),
+        objc2_foundation::NSSize::new(34.0, 34.0),
+    ));
 
     let draw_line = |text: &str, font_size: f64, bottom: f64| {
         let font = NSFont::boldSystemFontOfSize(font_size);
@@ -255,37 +261,35 @@ fn menu_bar_date_icon(style: MenuBarStyle) -> tauri::image::Image<'static> {
             NSAttributedString::alloc(), &string, Some(&attributes),
         ) };
         let size = line.size();
-        line.drawAtPoint(objc2_foundation::NSPoint::new((36.0 - size.width) / 2.0, bottom));
+        line.drawAtPoint(objc2_foundation::NSPoint::new((SIZE as f64 - size.width) / 2.0, bottom));
     };
 
     match style {
-        MenuBarStyle::Date => draw_line(&today.day().to_string(), 24.0, 4.0),
+        MenuBarStyle::Date => draw_line(&today.day().to_string(), 29.0, 1.0),
         MenuBarStyle::WeekdayDate => {
             let weekday = ["日", "一", "二", "三", "四", "五", "六"][today.weekday().num_days_from_sunday() as usize];
-            draw_line(&format!("周{weekday}"), 12.0, 19.0);
-            draw_line(&today.day().to_string(), 17.0, 0.0);
+            draw_line(&format!("周{weekday}"), 15.0, 18.0);
+            draw_line(&today.day().to_string(), 21.0, 0.0);
         }
         MenuBarStyle::Calendar => unreachable!(),
     }
 
     NSGraphicsContext::restoreGraphicsState_class();
-    let mut pixels = vec![0; 36 * 36 * 4];
+    let mut pixels = vec![0; SIZE * SIZE * 4];
     let bitmap = rep.bitmapData();
-    for row in 0..36 {
-        let source = unsafe { std::slice::from_raw_parts(bitmap.add(row * bytes_per_row), 36 * 4) };
-        for (pixel, rgba) in source.chunks_exact(4).enumerate() {
-            let index = (row * 36 + pixel) * 4;
-            pixels[index + 3] = rgba[3];
-        }
+    for row in 0..SIZE {
+        let source = unsafe { std::slice::from_raw_parts(bitmap.add(row * bytes_per_row), SIZE * 4) };
+        pixels[row * SIZE * 4..(row + 1) * SIZE * 4].copy_from_slice(source);
     }
-    tauri::image::Image::new_owned(pixels, 36, 36)
+    tauri::image::Image::new_owned(pixels, SIZE as u32, SIZE as u32)
 }
 
 #[cfg(target_os = "macos")]
 fn update_menu_bar_icon(app: &tauri::AppHandle, style: MenuBarStyle) -> Result<(), String> {
     let tray = app.tray_by_id("calendar-menu-bar").ok_or("菜单栏图标不可用")?;
     let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
-    tray.set_icon(Some(icon)).map_err(|error| error.to_string())
+    tray.set_icon_with_as_template(Some(icon), style == MenuBarStyle::Calendar)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -414,7 +418,7 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
     let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
     let tray = TrayIconBuilder::with_id("calendar-menu-bar")
         .icon(icon)
-        .icon_as_template(true)
+        .icon_as_template(style == MenuBarStyle::Calendar)
         .tooltip("日历")
         .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
@@ -470,6 +474,21 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn show_update_panel(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("日历窗口不可用")?;
+    if !window.is_visible().map_err(|error| error.to_string())? {
+        window.center().map_err(|error| error.to_string())?;
+    }
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    if let Ok(ns_window) = window.ns_window() {
+        unsafe { (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless() };
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -670,6 +689,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             menu_bar_style_set,
             quit_app,
+            show_update_panel,
+            commands::update::check_for_updates,
             open_aux_panel,
             close_aux_panel,
             commands::world_time::world_time_list_cities,
