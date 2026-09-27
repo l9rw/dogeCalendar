@@ -143,6 +143,14 @@ npm run tauri:build
 
 Build artifacts are emitted to the Tauri bundle directory under `src-tauri/target/release/`. The exact format depends on the current OS and Tauri bundle config.
 
+On macOS, if a downloaded app is blocked from opening because it is not notarized, verify that you trust the download, then remove its quarantine attribute before opening it:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/dogeCalendar.app"
+```
+
+Replace the path with the actual location of `dogeCalendar.app` if you installed it elsewhere. This is only needed for downloaded builds that macOS quarantines, not for `npm run tauri:dev`.
+
 ## Common scripts
 
 | Command | Description |

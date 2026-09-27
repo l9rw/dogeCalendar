@@ -143,6 +143,14 @@ npm run tauri:build
 
 构建产物会输出到 `src-tauri/target/release/` 下的 Tauri bundle 目录。具体格式取决于当前操作系统和 Tauri 的 bundle 配置。
 
+macOS 上，如果下载的应用因未公证而被系统阻止打开，请先确认下载来源可信，再执行以下命令移除隔离属性：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/dogeCalendar.app"
+```
+
+如果应用未安装在 `/Applications`，请将路径替换为 `dogeCalendar.app` 的实际位置。仅下载后被 macOS 隔离的构建需要执行此命令，`npm run tauri:dev` 无需执行。
+
 ## 常用脚本
 
 | 命令 | 作用 |
