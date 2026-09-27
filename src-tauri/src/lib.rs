@@ -1,4 +1,4 @@
-use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Listener, Manager};
 
 mod commands;
 mod domain;
@@ -9,20 +9,31 @@ mod state;
 use state::AppState;
 
 #[cfg(windows)]
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(windows)]
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_MULTITHREADED,
+    },
+    System::Variant::VARIANT,
+    UI::Accessibility::{
+        CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_ClassNamePropertyId,
+    },
     UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        GetWindowRect, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint,
+        CallNextHookEx, DispatchMessageW, FindWindowW, GetAncestor, GetClassNameW, GetMessageW,
+        GetParent, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint,
         GA_ROOT, HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
 
 #[cfg(windows)]
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+#[cfg(windows)]
+static CLOCK_RECT: Mutex<Option<RECT>> = Mutex::new(None);
 
 #[cfg(windows)]
 fn class_name(hwnd: HWND) -> String {
@@ -38,10 +49,20 @@ fn is_taskbar_clock(point: POINT) -> bool {
         return false;
     }
 
+    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    if root.is_invalid()
+        || !matches!(
+            class_name(root).as_str(),
+            "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        )
+    {
+        return false;
+    }
+
     let mut current = hwnd;
     for _ in 0..8 {
         let name = class_name(current);
-        if name.contains("Clock") || name.contains("DateTime") || name == "TrayClockWClass" {
+        if matches!(name.as_str(), "ClockButton" | "TrayClockWClass") {
             return true;
         }
         current = unsafe { GetParent(current) }.unwrap_or_default();
@@ -50,26 +71,54 @@ fn is_taskbar_clock(point: POINT) -> bool {
         }
     }
 
-    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    if root.is_invalid() || class_name(root) != "Shell_TrayWnd" {
-        return false;
-    }
+    // Win11 exposes the clock as a UIA element, while WindowFromPoint only sees
+    // the whole taskbar. The background worker caches the exact clock bounds.
+    CLOCK_RECT
+        .try_lock()
+        .ok()
+        .and_then(|rect| *rect)
+        .is_some_and(|rect| point_in_rect(point, rect))
+}
 
-    let mut rect = windows::Win32::Foundation::RECT::default();
-    if unsafe { GetWindowRect(root, &mut rect) }.is_err() {
-        return false;
-    }
+#[cfg(windows)]
+fn point_in_rect(point: POINT, rect: RECT) -> bool {
+    point.x >= rect.left
+        && point.x < rect.right
+        && point.y >= rect.top
+        && point.y < rect.bottom
+}
 
-    // Explorer does not expose a stable clock control class across Windows versions.
-    // Limit the fallback hit area to the taskbar's clock-side edge instead of the
-    // complete taskbar, so notification and system-tray clicks remain untouched.
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
-    let near_bottom = point.y >= rect.bottom - 80 && point.x >= rect.right - 220;
-    let near_top = point.y <= rect.top + 80 && point.x >= rect.right - 220;
-    let near_right = point.x >= rect.right - 80 && point.y >= rect.bottom - 220;
-    let near_left = point.x <= rect.left + 80 && point.y >= rect.bottom - 220;
-    (width > height && (near_bottom || near_top)) || (height >= width && (near_right || near_left))
+#[cfg(all(test, windows))]
+#[test]
+fn clock_hit_area_excludes_adjacent_tray_controls() {
+    let rect = RECT {
+        left: 1434,
+        top: 869,
+        right: 1496,
+        bottom: 917,
+    };
+    assert!(point_in_rect(POINT { x: 1450, y: 890 }, rect));
+    assert!(!point_in_rect(POINT { x: 1425, y: 890 }, rect)); // volume
+    assert!(!point_in_rect(POINT { x: 1500, y: 890 }, rect)); // show desktop
+}
+
+#[cfg(windows)]
+fn clock_rect(automation: &IUIAutomation) -> Option<RECT> {
+    let taskbar = unsafe { FindWindowW(windows::core::w!("Shell_TrayWnd"), None) }.ok()?;
+    let element = unsafe { automation.ElementFromHandle(taskbar) }.ok()?;
+    let condition = unsafe {
+        automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("SystemTray.OmniButton"),
+        )
+    }
+    .ok()?;
+    let clock = unsafe { element.FindFirst(TreeScope_Descendants, &condition) }.ok()?;
+    if unsafe { clock.CurrentAutomationId() }.ok()?.to_string() != "SystemTrayIcon" {
+        return None;
+    }
+    let rect = unsafe { clock.CurrentBoundingRectangle() }.ok()?;
+    (rect.left < rect.right && rect.top < rect.bottom).then_some(rect)
 }
 
 #[cfg(windows)]
@@ -101,15 +150,33 @@ fn start_mouse_hook(app: tauri::AppHandle) {
     let _ = APP_HANDLE.set(app);
     std::thread::spawn(|| {
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) };
-        let Ok(hook) = hook else { return };
-        let mut message = MSG::default();
-        while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
-            unsafe {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
+        if let Ok(hook) = hook {
+            let mut message = MSG::default();
+            while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
+                unsafe {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
+        }
+    });
+    std::thread::spawn(|| {
+        if unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_err() {
+            return;
+        }
+        if let Ok(automation) =
+            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
+        {
+            loop {
+                let rect = clock_rect(&automation);
+                if let Ok(mut cached) = CLOCK_RECT.lock() {
+                    *cached = rect;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
         }
-        let _ = unsafe { UnhookWindowsHookEx(hook) };
+        unsafe { CoUninitialize() };
     });
 }
 
@@ -166,23 +233,12 @@ fn quit_app(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) -> Result<(), String> {
-    let (label, title, width, height) = match panel.as_str() {
-        "detail" => ("detail", "日期详情", 350.0, 600.0),
-        "clock" => ("clock", "世界时间", 520.0, 300.0),
+    let (label, width, height) = match panel.as_str() {
+        "detail" => ("detail", 350.0, 600.0),
+        "clock" => ("clock", 520.0, 300.0),
         _ => return Err("未知面板".into()),
     };
-    if let Some(window) = app.get_webview_window(label) {
-        if label == "detail" {
-            if let Some(date) = date {
-                app.emit_to(label, "detail-date-changed", date)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-
+    let window = app.get_webview_window(label).ok_or("附属窗口不可用")?;
     let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
     let scale = main.scale_factor().map_err(|error| error.to_string())?;
     let main_pos = main.outer_position().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
@@ -200,21 +256,14 @@ fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) ->
         main_pos.x + main_size.width + 12.0
     }.clamp(left, (right - width).max(left));
     let y = main_pos.y.clamp(top, (bottom - height).max(top));
-    let url = if label == "detail" {
-        format!("index.html?panel=detail&date={}", date.unwrap_or_default())
-    } else {
-        "index.html?panel=clock".to_string()
-    };
-    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
-        .title(title)
-        .inner_size(width, height)
-        .position(x, y)
-        .resizable(false)
-        .decorations(false)
-        .transparent(true)
-        .skip_taskbar(true)
-        .build()
-        .map_err(|error| error.to_string())?;
+    window.set_position(tauri::LogicalPosition::new(x, y)).map_err(|error| error.to_string())?;
+    if label == "detail" {
+        if let Some(date) = date {
+            app.emit_to(label, "detail-date-changed", date)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -384,10 +433,11 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Focused(false) => {
                     let aux_visible = ["detail", "clock"].iter().any(|label| {
-                        window.app_handle().get_webview_window(label)
+                        window.app_handle()
+                            .get_webview_window(label)
                             .is_some_and(|aux| aux.is_visible().unwrap_or(false))
                     });
-                    if window.label() != "main" || !aux_visible {
+                    if window.label() == "main" && !aux_visible {
                         let _ = window.hide();
                     }
                 }

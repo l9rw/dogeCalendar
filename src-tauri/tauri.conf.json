@@ -22,6 +22,30 @@
         "transparent": true,
         "visible": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "detail",
+        "title": "日期详情",
+        "url": "index.html?panel=detail",
+        "width": 350,
+        "height": 600,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true
+      },
+      {
+        "label": "clock",
+        "title": "世界时间",
+        "url": "index.html?panel=clock",
+        "width": 520,
+        "height": 300,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": {
