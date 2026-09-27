@@ -76,25 +76,14 @@ function lunarParts(date: Date) {
       day: "numeric",
     });
     const parts = formatter.formatToParts(date);
+    const dayText = parts.find((part) => part.type === "day")?.value ?? "";
     return {
       month: parts.find((part) => part.type === "month")?.value ?? "",
-      day: Number(parts.find((part) => part.type === "day")?.value ?? 0),
+      day: Number(dayText) || lunarDayNames.indexOf(dayText) + 1,
     };
   } catch {
     return { month: "", day: 0 };
   }
-}
-
-function lunarText(date: Date) {
-  const { month, day } = lunarParts(date);
-  if (!day) return "农历";
-  return `${month}${lunarDayNames[day - 1] ?? day}`;
-}
-
-function lunarDayText(date: Date) {
-  const { day } = lunarParts(date);
-  if (!day) return "";
-  return lunarDayNames[day - 1] ?? String(day);
 }
 
 export function dateKey(date: Date) {
@@ -116,8 +105,8 @@ export function getCalendarMeta(date: Date): CalendarMeta {
   const resolvedStatus = annualHoliday?.status;
 
   return {
-    lunar: lunarText(date),
-    lunarDay: lunarDayText(date),
+    lunar: day ? `${month}${lunarDayNames[day - 1] ?? day}` : "农历",
+    lunarDay: day ? lunarDayNames[day - 1] ?? String(day) : "",
     solarTerm,
     holiday: resolvedHoliday,
     holidayType: resolvedStatus === "workday" ? "workday" : resolvedHoliday ? "holiday" : isWeekend ? "rest" : "workday",

@@ -65,7 +65,7 @@ button { font: inherit; }
   width: 100%;
   min-height: 100vh;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
   background: var(--surface);
   border: 1px solid var(--shell-border);
   border-radius: 16px;
@@ -99,7 +99,7 @@ button { font: inherit; }
 .theme-option .theme-label { font-weight: 600; }
 .theme-option .theme-desc { margin-left: auto; color: var(--muted); font-size: 12px; }
 
-.calendar-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: 500px; align-items: stretch; }
+.calendar-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: calc(100vh - 34px); align-items: stretch; }
 .detail-panel { position: relative; height: 100%; min-height: 0; padding: 24px 22px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(160deg, var(--surface), var(--surface-2)); box-shadow: var(--shadow-panel); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 .detail-panel::-webkit-scrollbar { width: 6px; }
 .detail-panel::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--scrollbar); }
@@ -132,9 +132,9 @@ button { font: inherit; }
 .side-holiday-card .holiday-lines p { white-space: normal; line-height: 1.5; }
 .side-holiday-card .countdown { padding: 8px 12px 10px; line-height: 1.5; }
 
-.calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 58px; padding: 9px 7px 7px; }
+.calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 48px; padding: 5px 3px; }
 .calendar-select { height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); font-size: 14px; cursor: pointer; }
-.calendar-select-year { margin-left: auto; }
+.calendar-select-year { width: 90px; margin-left: auto; }
 .calendar-select:hover { border-color: var(--blue); }
 .month-control { display: flex; align-items: center; gap: 8px; }
 .month-control > button { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; color: var(--text-dim); background: transparent; font-size: 24px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
@@ -165,10 +165,10 @@ button { font: inherit; }
 .popover-close { position: absolute; top: 10px; right: 12px; z-index: 1; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-dim); background: var(--surface); font-size: 18px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .popover-close:hover { border-color: var(--blue); color: var(--blue); }
 .detail-popover { padding: 20px 22px 18px; }
-.weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); height: 39px; align-items: center; color: var(--text-dim); font-size: 14px; text-align: center; }
+.weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); height: 30px; align-items: center; color: var(--text-dim); font-size: 13px; text-align: center; }
 .weekend-heading { color: var(--red); }
 .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); flex: 1; }
-.day-cell { position: relative; min-height: 67px; padding: 8px 3px 5px; border: 0; border-radius: 12px; color: var(--text); background: transparent; cursor: pointer; }
+.day-cell { position: relative; min-height: 48px; padding: 4px 2px; border: 0; border-radius: 10px; color: var(--text); background: transparent; cursor: pointer; }
 .day-cell.weekend { background: var(--weekend-bg); }
 .day-cell:hover { background: var(--surface-3); }
 .day-cell.muted { color: var(--text-faint); }
@@ -176,9 +176,10 @@ button { font: inherit; }
 .day-cell.holiday-cell { margin: 1px 2px; background: var(--holiday-bg); }
 .day-cell.workday-cell { margin: 1px 2px; background: var(--workday-bg); }
 .day-cell.selected { outline: 2px solid var(--blue); outline-offset: -1px; background: var(--surface); }
+.day-cell.today:not(.selected) { box-shadow: inset 0 0 0 1px var(--blue); }
 .solar-day, .lunar-day, .solar-term { position: relative; z-index: 1; display: block; text-align: center; }
-.solar-day { font-size: 22px; font-weight: 500; line-height: 26px; }
-.lunar-day { margin-top: 1px; color: var(--text-soft); font-size: 12px; }
+.solar-day { font-size: 18px; font-weight: 500; line-height: 22px; }
+.lunar-day { margin-top: 1px; color: var(--text-soft); font-size: 11px; }
 .lunar-day.special-day { color: var(--red); }
 .muted .lunar-day { color: var(--text-faint); }
 .solar-term { color: var(--red); font-size: 11px; }
@@ -209,28 +210,21 @@ button { font: inherit; }
 .mini-month-grid .today { color: #fff; background: var(--blue); }
 
 @media (max-width: 560px) {
-  .calendar-shell { padding: 20px 12px 14px; }
-  .calendar-layout { grid-template-columns: 1fr; gap: 22px; height: auto; align-items: start; }
-  .calendar-area { height: auto; overflow: visible; }
-  .calendar-body { overflow: visible; }
-  .calendar-card { flex: none; }
+  .calendar-layout { grid-template-columns: 1fr; }
   .detail-date { margin-top: 25px; }
   .side-holiday-card { max-width: 420px; }
   .detail-today { width: auto; margin-top: 23px; padding-inline: 20px; }
   .calendar-header { gap: 5px; padding-inline: 1px; }
-  .calendar-select-year { width: 78px; }
+  .calendar-select-year { width: 86px; }
   .month-control { gap: 3px; }
-  .day-cell { min-height: 61px; }
-  .solar-day { font-size: 20px; }
   .holiday-lines p { font-size: 10px; }
   .holiday-date { min-width: 100px; }
 }
 
 @media (min-width: 561px) and (max-width: 850px) {
-  .calendar-shell { padding: 24px 16px 18px; }
   .detail-day { font-size: 64px; }
   .calendar-header { gap: 5px; padding-inline: 1px; }
-  .calendar-select-year { width: 80px; }
+  .calendar-select-year { width: 88px; }
 }
 
 .weather-card { position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(160deg, var(--surface-3), var(--surface)); }

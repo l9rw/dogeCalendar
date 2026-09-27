@@ -172,7 +172,7 @@ fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
 
 #[cfg(target_os = "macos")]
 fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    use objc2_app_kit::{NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior};
+    use objc2_app_kit::{NSPopUpMenuWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
     window.set_effects(
         EffectsBuilder::new()
@@ -184,8 +184,11 @@ fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     let ns_window = window.ns_window()? as *mut NSWindow;
     // The window is created by Tauri; AppKit settings make it behave as a transient menu panel.
     unsafe {
-        (*ns_window).setLevel(NSFloatingWindowLevel);
-        (*ns_window).setHidesOnDeactivate(true);
+        // Full-screen apps cover floating windows; menu popups must sit above them.
+        (*ns_window).setLevel(NSPopUpMenuWindowLevel);
+        // Focus-loss handling below dismisses the panel without AppKit hiding it
+        // during the activation change from the full-screen application.
+        (*ns_window).setHidesOnDeactivate(false);
         (*ns_window).setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Transient
@@ -217,9 +220,13 @@ fn menu_bar_icon() -> tauri::image::Image<'static> {
 #[cfg(target_os = "macos")]
 fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
     let Some(window) = app.get_webview_window("main") else {
+        #[cfg(debug_assertions)]
+        eprintln!("calendar tray: main window missing");
         return;
     };
     let Ok(size) = window.outer_size() else {
+        #[cfg(debug_assertions)]
+        eprintln!("calendar tray: failed to read main window size");
         return;
     };
 
@@ -262,16 +269,48 @@ fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
         );
     }
 
-    let _ = window.set_position(tauri::LogicalPosition::new(x.round(), y.round()));
-    let _ = window.show();
-    let _ = window.set_focus();
+    let position = tauri::LogicalPosition::new(x.round(), y.round());
+    if let Err(error) = window.set_position(position) {
+        eprintln!("calendar tray: failed to position panel: {error}");
+    }
+    if let Err(error) = window.show() {
+        eprintln!("calendar tray: failed to show panel: {error}");
+    }
+    if let Err(error) = window.set_focus() {
+        eprintln!("calendar tray: failed to focus panel: {error}");
+    }
+    // A window left on another Space may still be "visible" to Tauri. Bring it
+    // above the current full-screen Space after activating the app.
+    if let Ok(ns_window) = window.ns_window() {
+        unsafe { (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless() };
+    }
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "calendar tray: show at ({}, {}), visible={:?}, focused={:?}",
+        position.x,
+        position.y,
+        window.is_visible(),
+        window.is_focused()
+    );
 }
 
 #[cfg(target_os = "macos")]
 fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
     PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        let on_active_space = window
+            .ns_window()
+            .map(|ns_window| unsafe {
+                (*(ns_window as *mut objc2_app_kit::NSWindow)).isOnActiveSpace()
+            })
+            .unwrap_or(false);
+        let visible = window.is_visible().unwrap_or(false);
+        let focused = window.is_focused().unwrap_or(false);
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "calendar tray: toggle visible={visible}, active_space={on_active_space}, focused={focused}"
+        );
+        if visible && on_active_space && focused {
             let _ = window.hide();
         } else {
             show_calendar_below_tray(app, rect);
@@ -298,7 +337,10 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
                 ..
             } = event
             {
-                if button_state == MouseButtonState::Up {
+                #[cfg(debug_assertions)]
+                eprintln!("calendar tray: {button:?} {button_state:?}");
+                // Full-screen menu bars can retreat before mouse-up reaches the status item.
+                if button_state == MouseButtonState::Down {
                     let app = tray.app_handle();
                     match button {
                         MouseButton::Left => {
@@ -557,6 +599,8 @@ pub fn run() {
                 tauri::WindowEvent::Focused(false) => {
                     #[cfg(target_os = "macos")]
                     {
+                        #[cfg(debug_assertions)]
+                        eprintln!("calendar tray: {} lost focus", window.label());
                         let generation = PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
                         let window = window.clone();
                         std::thread::spawn(move || {
@@ -574,11 +618,15 @@ pub fn run() {
                                         .is_some_and(|aux| aux.is_focused().unwrap_or(false))
                                 });
                                 if window.label() != "main" && !window.is_focused().unwrap_or(false) {
+                                    #[cfg(debug_assertions)]
+                                    eprintln!("calendar tray: hiding unfocused {} panel", window.label());
                                     let _ = window.hide();
                                 }
                                 if !aux_focused {
                                     if let Some(main) = main {
                                         if !main.is_focused().unwrap_or(false) {
+                                            #[cfg(debug_assertions)]
+                                            eprintln!("calendar tray: hiding unfocused main panel");
                                             let _ = main.hide();
                                         }
                                     }

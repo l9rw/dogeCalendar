@@ -10,8 +10,7 @@ import { WorldClockStrip } from "./components/WorldClockStrip";
 
 type CalendarDay = {
   date: Date;
-  lunar: string;
-  lunarDay: string;
+  lunarLabel: string;
   label?: string;
   holiday?: string;
   isCurrentMonth: boolean;
@@ -66,8 +65,7 @@ function buildMonth(year: number, month: number): CalendarDay[] {
     const meta = getCalendarMeta(date);
     return {
       date,
-      lunar: meta.lunar,
-      lunarDay: meta.lunarDay,
+      lunarLabel: meta.lunarDay === "初一" ? meta.lunar.slice(0, -meta.lunarDay.length) : meta.lunarDay || meta.lunar,
       label: meta.solarTerm,
       holiday: meta.holiday,
       isCurrentMonth: date.getMonth() === month,
@@ -339,8 +337,8 @@ function CalendarApp() {
             value={cursor.getFullYear()}
             onChange={(event) => setCursor(new Date(Number(event.target.value), cursor.getMonth(), 1))}
           >
-            {Array.from({ length: 21 }, (_, offset) => {
-              const year = now.getFullYear() - 10 + offset;
+            {Array.from({ length: 201 }, (_, offset) => {
+              const year = 1900 + offset;
               return <option key={year} value={year}>{year}年</option>;
             })}
           </select>
@@ -417,13 +415,14 @@ function CalendarApp() {
                 const selectedDay = selectedKey === day.date.toDateString();
                 return (
                   <button
-                    className={`day-cell ${day.isCurrentMonth ? "" : "muted"} ${day.isWeekend ? "weekend" : ""} ${selectedDay ? "selected" : ""} ${day.isRest ? "holiday-cell" : ""} ${day.isWorkday ? "workday-cell" : ""}`}
+                    className={`day-cell ${day.isCurrentMonth ? "" : "muted"} ${day.isWeekend ? "weekend" : ""} ${selectedDay ? "selected" : ""} ${day.isToday ? "today" : ""} ${day.isRest ? "holiday-cell" : ""} ${day.isWorkday ? "workday-cell" : ""}`}
                     key={day.date.toISOString()}
                     onClick={() => selectDate(day.date)}
+                    aria-current={day.isToday ? "date" : undefined}
                   >
                     <span className="solar-day">{day.date.getDate()}{day.isWorkday && <b className="work-mark">班</b>}</span>
                     <span className={`lunar-day ${day.holiday || day.label ? "special-day" : ""}`}>
-                      {day.isToday ? "今天" : day.holiday ?? day.label ?? day.lunarDay}
+                      {day.holiday ?? day.label ?? day.lunarLabel}
                     </span>
                     {day.isRest && <b className="rest-mark">休</b>}
                   </button>
