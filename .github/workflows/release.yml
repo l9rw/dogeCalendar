@@ -42,7 +42,7 @@ jobs:
         run: npm run tauri:build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
       - uses: actions/upload-artifact@v4
         with:
-          name: calendar-${{ matrix.target }}
+          name: dogeCalendar-${{ matrix.target }}
           path: src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle }}/*.${{ matrix.extension }}
           if-no-files-found: error
 
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: calendar-*
+          pattern: dogeCalendar-*
           path: release-assets
           merge-multiple: true
       - name: Publish GitHub Release
@@ -63,6 +63,7 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "dogeCalendar $GITHUB_REF_NAME"
           else
-            gh release create "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --title "Calendar $GITHUB_REF_NAME" --generate-notes --verify-tag
+            gh release create "$GITHUB_REF_NAME" release-assets/* --repo "$GITHUB_REPOSITORY" --title "dogeCalendar $GITHUB_REF_NAME" --generate-notes --verify-tag
           fi

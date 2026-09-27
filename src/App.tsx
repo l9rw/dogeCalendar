@@ -351,11 +351,11 @@ function CalendarApp() {
       ) : infoPanel ? (
         <section className="settings-panel info-panel" aria-label={infoPanel === "about" ? "关于" : "在线更新"}>
           <div className="settings-header">
-            <div><p className="eyebrow">{infoPanel === "about" ? "ABOUT CALENDAR" : "SOFTWARE UPDATE"}</p><h2>{infoPanel === "about" ? "关于" : "在线更新"}</h2></div>
+            <div><p className="eyebrow">{infoPanel === "about" ? "ABOUT dogeCalendar" : "SOFTWARE UPDATE"}</p><h2>{infoPanel === "about" ? "关于" : "在线更新"}</h2></div>
             <button className="settings-close" aria-label="关闭" onClick={() => setInfoPanel(null)}>×</button>
           </div>
           {infoPanel === "about" ? <>
-            <div className="info-app"><img src="/icon.png" alt="" /><div><strong>Calendar</strong><span>版本 {appVersion || "获取中…"}</span></div></div>
+            <div className="info-app"><img src="/icon.png" alt="" /><div><strong>dogeCalendar</strong><span>版本 {appVersion || "获取中…"}</span></div></div>
             <p className="settings-description">轻量桌面日历，提供农历、天气与世界时钟。</p>
             <div className="info-actions">
               <button className="info-button primary" onClick={() => void checkUpdates()}>检查更新</button>

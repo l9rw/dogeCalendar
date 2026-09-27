@@ -1,4 +1,4 @@
-# Calendar
+# dogeCalendar
 
 A lightweight cross-platform desktop calendar built with Tauri 2, React and TypeScript.
 

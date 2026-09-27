@@ -1,4 +1,4 @@
-# Calendar
+# dogeCalendar
 
 一个基于 Tauri 2、React 和 TypeScript 构建的轻量跨平台桌面日历。
 

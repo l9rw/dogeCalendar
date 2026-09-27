@@ -1,7 +1,7 @@
 use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use chrono::{Datelike, Local};
 #[cfg(target_os = "macos")]
@@ -14,6 +14,8 @@ use tauri::{
 
 #[cfg(target_os = "macos")]
 static PANEL_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "macos")]
+static MAIN_PANEL_FOCUSED: AtomicBool = AtomicBool::new(false);
 
 mod commands;
 mod domain;
@@ -194,9 +196,9 @@ fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
         // during the activation change from the full-screen application.
         (*ns_window).setHidesOnDeactivate(false);
         (*ns_window).setCollectionBehavior(
-            // A hidden window can remain attached to the desktop Space even when
-            // shown from a full-screen app. Move it to the Space being activated.
-            NSWindowCollectionBehavior::MoveToActiveSpace
+            // Other apps' full-screen Spaces cannot be moved into. The popup
+            // needs to be present on every Space instead.
+            NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Transient
                 | NSWindowCollectionBehavior::FullScreenAuxiliary,
         );
@@ -377,27 +379,26 @@ fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
     }
 
     let position = tauri::LogicalPosition::new(x.round(), y.round());
+    MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
     if let Err(error) = window.set_position(position) {
         eprintln!("calendar tray: failed to position panel: {error}");
     }
-    if let Err(error) = window.show() {
-        eprintln!("calendar tray: failed to show panel: {error}");
-    }
-    if let Err(error) = window.set_focus() {
-        eprintln!("calendar tray: failed to focus panel: {error}");
-    }
-    // A window left on another Space may still be "visible" to Tauri. Bring it
-    // above the current full-screen Space after activating the app.
-    if let Ok(ns_window) = window.ns_window() {
-        unsafe { (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless() };
+    // Tauri's show() makes the window key, and set_focus() activates our app.
+    // Either can switch away from another application's full-screen Space.
+    match window.ns_window() {
+        Ok(ns_window) => unsafe {
+            (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless()
+        },
+        Err(error) => eprintln!("calendar tray: failed to get native panel: {error}"),
     }
     #[cfg(debug_assertions)]
     eprintln!(
-        "calendar tray: show at ({}, {}), visible={:?}, focused={:?}",
+        "calendar tray: show at ({}, {}), visible={:?}, focused={:?}, active_space={:?}",
         position.x,
         position.y,
         window.is_visible(),
-        window.is_focused()
+        window.is_focused(),
+        window.ns_window().map(|ptr| unsafe { (*(ptr as *mut objc2_app_kit::NSWindow)).isOnActiveSpace() })
     );
 }
 
@@ -412,12 +413,14 @@ fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
             })
             .unwrap_or(false);
         let visible = window.is_visible().unwrap_or(false);
+        #[cfg(debug_assertions)]
         let focused = window.is_focused().unwrap_or(false);
         #[cfg(debug_assertions)]
         eprintln!(
             "calendar tray: toggle visible={visible}, active_space={on_active_space}, focused={focused}"
         );
-        if visible && on_active_space && focused {
+        if visible && on_active_space {
+            MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
             let _ = window.hide();
         } else {
             show_calendar_below_tray(app, rect);
@@ -769,7 +772,7 @@ pub fn run() {
                 let window = app
                     .get_webview_window("main")
                     .expect("main window not found");
-                window.set_title("Calendar")?;
+                window.set_title("dogeCalendar")?;
             }
             Ok(())
         })
@@ -778,6 +781,10 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.hide();
+                }
+                #[cfg(target_os = "macos")]
+                tauri::WindowEvent::Focused(true) if window.label() == "main" => {
+                    MAIN_PANEL_FOCUSED.store(true, Ordering::Relaxed);
                 }
                 tauri::WindowEvent::Focused(false) => {
                     #[cfg(target_os = "macos")]
@@ -807,10 +814,12 @@ pub fn run() {
                                 }
                                 if !aux_focused {
                                     if let Some(main) = main {
-                                        if !main.is_focused().unwrap_or(false) {
+                                        if MAIN_PANEL_FOCUSED.load(Ordering::Relaxed)
+                                            && !main.is_focused().unwrap_or(false) {
                                             #[cfg(debug_assertions)]
                                             eprintln!("calendar tray: hiding unfocused main panel");
                                             let _ = main.hide();
+                                            MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
                                         }
                                     }
                                 }
