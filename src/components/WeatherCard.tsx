@@ -14,6 +14,20 @@ const ICONS: Record<string, string> = {
   storm: "⛈",
 };
 
+function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
+  return (
+    <svg className={spinning ? "weather-refresh-icon spinning" : "weather-refresh-icon"} viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14.7-4L3 10m0-4v4h4M4 13a8 8 0 0 0 14.7 4L21 14m0 4v-4h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function forecastDate(value: string, index: number) {
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return index === 0 ? "今天" : `+${index}天`;
+  return index === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 export function WeatherCard() {
   const weather = useInfoStore((state) => state.weather);
   const loading = useInfoStore((state) => state.loadingWeather);
@@ -41,8 +55,8 @@ export function WeatherCard() {
         <span className="weather-empty-text">
           {error ?? "暂无天气信息"}
         </span>
-        <button className="weather-refresh" onClick={() => loadWeather()}>
-          获取天气
+        <button className="weather-refresh" onClick={() => loadWeather()} aria-label="获取天气" title="获取天气">
+          <RefreshIcon />
         </button>
       </div>
     );
@@ -71,9 +85,22 @@ export function WeatherCard() {
         className="weather-refresh"
         disabled={loading}
         onClick={() => loadWeather()}
+        aria-label={loading ? "刷新中" : "刷新天气"}
+        title={loading ? "刷新中" : "刷新天气"}
       >
-        {loading ? "刷新中" : "刷新"}
+        <RefreshIcon spinning={loading} />
       </button>
+      {!!data.forecast?.length && (
+        <div className="weather-forecast" aria-label="未来三天天气">
+          {data.forecast.slice(0, 3).map((item, index) => (
+            <div className="weather-forecast-day" key={item.date}>
+              <span>{forecastDate(item.date, index)}</span>
+              <b>{ICONS[item.icon] ?? "🌤"}</b>
+              <strong>{Math.round(item.temperature_max)}° <em>{Math.round(item.temperature_min)}°</em></strong>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod location;
 pub mod weather;
 pub mod update;

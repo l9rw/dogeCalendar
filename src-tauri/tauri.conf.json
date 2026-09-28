@@ -16,7 +16,7 @@
         "label": "main",
         "title": "dogeCalendar",
         "width": 420,
-        "height": 430,
+        "height": 510,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,

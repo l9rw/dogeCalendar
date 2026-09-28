@@ -1,3 +1,5 @@
+import { holidayOverrides, type HolidayOverride } from "../data/holidayOverrides";
+
 export type HolidayType = "holiday" | "rest" | "workday" | "none";
 
 export type CalendarMeta = {
@@ -26,6 +28,8 @@ const fixedHolidays: Record<string, string> = {
   "10-1": "国庆节",
 };
 
+const publicFixedHolidays = new Set(["1-1", "5-1", "10-1"]);
+
 const lunarFestivals: Record<string, string> = {
   "正月-1": "春节",
   "正月-15": "元宵节",
@@ -35,38 +39,35 @@ const lunarFestivals: Record<string, string> = {
   "九月-9": "重阳节",
 };
 
+const publicLunarFestivals = new Set(["正月-1", "五月-5", "八月-15"]);
+
 const lunarDayNames = ["初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"];
 
-type HolidayOverride = { name: string; status: "holiday" | "rest" | "workday" };
+export type HolidayYear = Record<string, HolidayOverride>;
+export type HolidayYears = Record<number, HolidayYear>;
 
-// Built-in annual data is intentionally replaceable by a remote provider later.
-const annualHolidayOverrides: Record<number, Record<string, HolidayOverride>> = {
-  2026: {
-    "2026-01-01": { name: "元旦", status: "holiday" },
-    "2026-02-15": { name: "春节", status: "rest" },
-    "2026-02-16": { name: "春节", status: "holiday" },
-    "2026-02-17": { name: "春节", status: "holiday" },
-    "2026-02-18": { name: "春节", status: "rest" },
-    "2026-02-19": { name: "春节", status: "rest" },
-    "2026-02-20": { name: "春节", status: "workday" },
-    "2026-04-04": { name: "清明节", status: "holiday" },
-    "2026-05-01": { name: "劳动节", status: "holiday" },
-    "2026-06-19": { name: "端午节", status: "holiday" },
-    "2026-09-20": { name: "中秋节", status: "workday" },
-    "2026-09-25": { name: "中秋节", status: "holiday" },
-    "2026-10-01": { name: "国庆节", status: "holiday" },
-    "2026-10-02": { name: "国庆节", status: "holiday" },
-    "2026-10-03": { name: "国庆节", status: "holiday" },
-    "2026-10-04": { name: "国庆节", status: "rest" },
-    "2026-10-05": { name: "国庆节", status: "rest" },
-    "2026-10-06": { name: "国庆节", status: "rest" },
-    "2026-10-07": { name: "国庆节", status: "rest" },
-    "2026-10-10": { name: "国庆节", status: "workday" },
-  },
-};
+const remoteHolidayRequests = new Map<number, Promise<HolidayYear | null>>();
 
-function getAnnualHoliday(date: Date) {
-  return annualHolidayOverrides[date.getFullYear()]?.[dateKey(date)];
+export async function fetchHolidayYear(year: number): Promise<HolidayYear | null> {
+  if (holidayOverrides[year]) return holidayOverrides[year];
+  const existing = remoteHolidayRequests.get(year);
+  if (existing) return existing;
+
+  const request = fetch(`https://timor.tech/api/holiday/year/${year}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`节假日接口请求失败（${response.status}）`);
+      const payload = await response.json() as { holiday?: Record<string, { date?: string; name?: string; holiday?: boolean }> };
+      const entries = Object.values(payload.holiday ?? {});
+      const result: HolidayYear = {};
+      for (const entry of entries) {
+        if (!entry.date || !entry.name || !entry.date.startsWith(`${year}-`)) continue;
+        result[entry.date] = { name: entry.name, status: entry.holiday ? "rest" : "workday" };
+      }
+      return result;
+    })
+    .catch(() => null);
+  remoteHolidayRequests.set(year, request);
+  return request;
 }
 
 function lunarParts(date: Date) {
@@ -93,23 +94,26 @@ export function dateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-export function getCalendarMeta(date: Date): CalendarMeta {
+export function getCalendarMeta(date: Date, annualHolidayOverrides?: HolidayYears): CalendarMeta {
   const monthDay = `${date.getMonth() + 1}-${date.getDate()}`;
   const { month, day } = lunarParts(date);
-  const lunarHoliday = day ? lunarFestivals[`${month}-${day}`] : undefined;
+  const lunarKey = `${month}-${day}`;
+  const lunarHoliday = day ? lunarFestivals[lunarKey] : undefined;
   const holiday = fixedHolidays[monthDay] ?? lunarHoliday;
   const solarTerm = solarTerms[monthDay];
   const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-  const annualHoliday = getAnnualHoliday(date);
-  const resolvedHoliday = annualHoliday?.name ?? holiday;
-  const resolvedStatus = annualHoliday?.status;
+  const annualHoliday = (annualHolidayOverrides?.[date.getFullYear()] ?? holidayOverrides[date.getFullYear()])?.[dateKey(date)];
+  // Annual entries drive rest/work markers; the festival label belongs only to
+  // the actual fixed or lunar festival date, not every day in the holiday break.
+  const resolvedHoliday = holiday;
+  const resolvedStatus = annualHoliday?.status ?? (publicFixedHolidays.has(monthDay) || (day > 0 && publicLunarFestivals.has(lunarKey)) ? "holiday" : undefined);
 
   return {
     lunar: day ? `${month}${lunarDayNames[day - 1] ?? day}` : "农历",
     lunarDay: day ? lunarDayNames[day - 1] ?? String(day) : "",
     solarTerm,
     holiday: resolvedHoliday,
-    holidayType: resolvedStatus === "workday" ? "workday" : resolvedHoliday ? "holiday" : isWeekend ? "rest" : "workday",
-    holidayStatus: resolvedStatus ?? (resolvedHoliday ? "holiday" : isWeekend ? "rest" : "workday"),
+    holidayType: resolvedStatus ?? (isWeekend ? "rest" : "workday"),
+    holidayStatus: resolvedStatus,
   };
 }

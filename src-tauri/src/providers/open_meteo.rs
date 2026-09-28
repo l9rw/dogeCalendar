@@ -1,12 +1,13 @@
 use serde::Deserialize;
 
-use crate::domain::{CachedWeather, StoredLocation};
+use crate::domain::{CachedWeather, StoredLocation, WeatherForecast};
 
 const ENDPOINT: &str = "https://api.open-meteo.com/v1/forecast";
 
 #[derive(Debug, Deserialize)]
 struct Forecast {
     current: Current,
+    daily: Daily,
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,12 +20,20 @@ struct Current {
     wind_speed_10m: Option<f64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct Daily {
+    time: Vec<String>,
+    temperature_2m_max: Vec<f64>,
+    temperature_2m_min: Vec<f64>,
+    weather_code: Vec<u32>,
+}
+
 pub async fn fetch(
     client: &reqwest::Client,
     location: &StoredLocation,
 ) -> Result<CachedWeather, String> {
     let url = format!(
-        "{ENDPOINT}?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&timezone=auto",
+        "{ENDPOINT}?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=3&timezone=auto",
         lat = location.latitude,
         lon = location.longitude
     );
@@ -39,6 +48,24 @@ pub async fn fetch(
         .map_err(|err| format!("解析天气数据失败: {err}"))?;
     let weather_code = body.current.weather_code.unwrap_or(0);
     let (description, icon) = describe(weather_code, body.current.is_day.unwrap_or(1) == 1);
+    let forecast = body
+        .daily
+        .time
+        .iter()
+        .enumerate()
+        .map(|(index, date)| {
+            let code = body.daily.weather_code.get(index).copied().unwrap_or(0);
+            let (description, icon) = describe(code, true);
+            WeatherForecast {
+                date: date.clone(),
+                temperature_max: body.daily.temperature_2m_max.get(index).copied().unwrap_or(0.0),
+                temperature_min: body.daily.temperature_2m_min.get(index).copied().unwrap_or(0.0),
+                weather_code: code,
+                description,
+                icon,
+            }
+        })
+        .collect();
     Ok(CachedWeather {
         temperature: body.current.temperature_2m,
         apparent_temperature: body.current.apparent_temperature,
@@ -50,6 +77,7 @@ pub async fn fetch(
         is_day: body.current.is_day.unwrap_or(1) == 1,
         location_label: location.label.clone(),
         fetched_at: chrono::Utc::now().timestamp(),
+        forecast,
     })
 }
 

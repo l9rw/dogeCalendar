@@ -3,7 +3,8 @@ use tauri::{AppHandle, State};
 
 use crate::state::AppState;
 
-const RELEASES_API: &str = "https://api.github.com/repos/l9rw/dogeCalendar/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/l9rw/dogeCalendar/releases";
+const RELEASES_LATEST_API: &str = "https://api.github.com/repos/l9rw/dogeCalendar/releases/latest";
 const RELEASES_URL: &str = "https://github.com/l9rw/dogeCalendar/releases/tag/";
 
 #[derive(Deserialize)]
@@ -29,7 +30,7 @@ pub struct AvailableRelease {
 }
 
 fn available_release(release: GithubRelease, current: &str) -> Option<AvailableRelease> {
-    if release.draft || release.prerelease {
+    if release.draft {
         return None;
     }
     let tag_version = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
@@ -49,20 +50,68 @@ fn available_release(release: GithubRelease, current: &str) -> Option<AvailableR
     })
 }
 
-#[tauri::command]
-pub async fn check_for_updates(app: AppHandle, state: State<'_, AppState>) -> Result<UpdateCheck, String> {
-    let current_version = app.package_info().version.to_string();
-    let response = state.http.get(RELEASES_API)
+async fn fetch_releases(
+    state: &State<'_, AppState>,
+    include_beta: bool,
+) -> Result<Vec<GithubRelease>, String> {
+    let request = if include_beta {
+        state.http.get(RELEASES_API)
+    } else {
+        state.http.get(RELEASES_LATEST_API)
+    };
+    let response = request
         .header("Accept", "application/vnd.github+json")
-        .send().await.map_err(|error| format!("无法连接 GitHub：{error}"))?;
+        .send()
+        .await
+        .map_err(|error| format!("无法连接 GitHub：{error}"))?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(UpdateCheck { current_version, has_release: false, release: None });
+        return Ok(Vec::new());
     }
-    let response = response.error_for_status().map_err(|error| format!("获取发布版本失败：{error}"))?;
-    let release = response.json::<GithubRelease>().await
-        .map_err(|error| format!("解析发布版本失败：{error}"))?;
+    let response = response
+        .error_for_status()
+        .map_err(|error| format!("获取发布版本失败：{error}"))?;
+    if include_beta {
+        response
+            .json::<Vec<GithubRelease>>()
+            .await
+            .map_err(|error| format!("解析发布版本失败：{error}"))
+    } else {
+        response
+            .json::<GithubRelease>()
+            .await
+            .map(|release| vec![release])
+            .map_err(|error| format!("解析发布版本失败：{error}"))
+    }
+}
+
+#[tauri::command]
+pub async fn check_for_updates(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    include_beta: Option<bool>,
+) -> Result<UpdateCheck, String> {
+    let current_version = app.package_info().version.to_string();
+    let releases = fetch_releases(&state, include_beta.unwrap_or(false)).await?;
+    if releases.is_empty() {
+        return Ok(UpdateCheck {
+            current_version,
+            has_release: false,
+            release: None,
+        });
+    }
+    // Drafts are always skipped; prereleases are only considered in beta mode.
+    let include_prereleases = include_beta.unwrap_or(false);
+    let candidate = releases
+        .into_iter()
+        .filter(|release| !release.draft && (include_prereleases || !release.prerelease))
+        .filter_map(|release| available_release(release, &current_version))
+        .max_by(|a, b| {
+            semver::Version::parse(&a.version)
+                .ok()
+                .cmp(&semver::Version::parse(&b.version).ok())
+        });
     Ok(UpdateCheck {
-        release: available_release(release, &current_version),
+        release: candidate,
         current_version,
         has_release: true,
     })
@@ -86,12 +135,15 @@ mod tests {
     }
 
     #[test]
-    fn skips_unpublished_releases() {
-        let mut candidate = release("v1.0.0");
-        candidate.prerelease = true;
-        assert!(available_release(candidate, "0.9.9").is_none());
+    fn skips_draft_but_keeps_prereleases() {
+        // Drafts are always rejected regardless of beta mode.
         let mut candidate = release("v1.0.0");
         candidate.draft = true;
         assert!(available_release(candidate, "0.9.9").is_none());
+
+        // Prereleases pass `available_release`; the beta filter lives in the caller.
+        let mut prerelease = release("v1.0.0");
+        prerelease.prerelease = true;
+        assert!(available_release(prerelease, "0.9.9").is_some());
     }
 }

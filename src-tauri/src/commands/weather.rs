@@ -8,6 +8,7 @@ use crate::state::AppState;
 pub async fn weather_get(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
+    language: Option<String>,
 ) -> Result<WeatherReport, String> {
     let now = chrono::Utc::now().timestamp();
     let (location_opt, cached, failures, last_attempt) = {
@@ -29,6 +30,13 @@ pub async fn weather_get(
         }
     };
 
+    // Normalize the requested language to a short BCP-47 code (e.g. "zh", "en")
+    // for the reverse-geocoding service; fall back to English when unknown.
+    let language = language
+        .map(|raw| raw.split('_').next().unwrap_or(&raw).to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "en".to_string());
+
     let stale = cached
         .as_ref()
         .map(|cached| weather::is_stale(cached.fetched_at, now))
@@ -42,8 +50,9 @@ pub async fn weather_get(
             let http = state.http.clone();
             let handle = app.clone();
             let target = location.clone();
+            let lang = language.clone();
             tauri::async_runtime::spawn(async move {
-                match weather::fetch_fresh(&http, &target).await {
+                match weather::fetch_fresh(&http, &target, &lang).await {
                     Ok(weather) => {
                         weather::record_success(&store, &target, &weather, now);
                         let _ = handle.emit(
@@ -67,7 +76,7 @@ pub async fn weather_get(
     }
 
     // First run: nothing cached yet, fetch synchronously so the panel shows data.
-    match weather::fetch_fresh(&state.http, &location).await {
+    match weather::fetch_fresh(&state.http, &location, &language).await {
         Ok(weather) => {
             weather::record_success(&state.store, &location, &weather, now);
             Ok(WeatherReport {

@@ -46,6 +46,18 @@ pub struct CachedWeather {
     pub is_day: bool,
     pub location_label: String,
     pub fetched_at: i64,
+    #[serde(default)]
+    pub forecast: Vec<WeatherForecast>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherForecast {
+    pub date: String,
+    pub temperature_max: f64,
+    pub temperature_min: f64,
+    pub weather_code: u32,
+    pub description: String,
+    pub icon: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

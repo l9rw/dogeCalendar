@@ -1,5 +1,5 @@
 use crate::domain::{CachedWeather, StoredLocation};
-use crate::providers::open_meteo;
+use crate::providers::{open_meteo, reverse_geocode};
 use crate::services::store::Store;
 
 const CACHE_TTL_SECONDS: i64 = 30 * 60;
@@ -19,8 +19,22 @@ pub fn in_backoff(failures: u32, last_attempt: Option<i64>, now: i64) -> bool {
 pub async fn fetch_fresh(
     client: &reqwest::Client,
     location: &StoredLocation,
+    language: &str,
 ) -> Result<CachedWeather, String> {
-    open_meteo::fetch(client, location).await
+    let mut weather = open_meteo::fetch(client, location).await?;
+    // Localize the displayed place name to the app's configured language.
+    // Reverse geocoding is best-effort: keep the provider label on failure.
+    if let Ok(label) = reverse_geocode::resolve_label(
+        client,
+        location.latitude,
+        location.longitude,
+        language,
+    )
+    .await
+    {
+        weather.location_label = label;
+    }
+    Ok(weather)
 }
 
 pub fn record_success(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfoStore } from "../stores/infoStore";
 import type { City } from "../services/ipc";
 
@@ -28,8 +28,10 @@ export function WorldClockStrip() {
   }, [pickerOpen, query]);
 
   const results = useInfoStore((state) => state.searchResults);
-  const pinnedTzs = new Set(clocks.map((clock) => clock.timezone));
-  const candidates = results.filter((city) => !pinnedTzs.has(city.timezone)).slice(0, 8);
+  const candidates = useMemo(() => {
+    const pinnedTzs = new Set(clocks.map((clock) => clock.timezone));
+    return results.filter((city) => !pinnedTzs.has(city.timezone)).slice(0, 8);
+  }, [clocks, results]);
 
   const onDragStart = (index: number) => {
     dragIndex.current = index;

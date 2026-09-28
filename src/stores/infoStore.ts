@@ -8,6 +8,8 @@ import {
   type WeatherReport,
   type WorldClockSnapshot,
 } from "../services/ipc";
+import { useSettingsStore } from "./settingsStore";
+import { resolveLanguage } from "../data/i18n";
 
 type InfoState = {
   clocks: WorldClockSnapshot[];
@@ -93,7 +95,8 @@ export const useInfoStore = create<InfoState>((set, get) => ({
   loadWeather: async () => {
     set({ loadingWeather: true, weatherError: null });
     try {
-      const report = await weatherApi.get();
+      const language = resolveLanguage(useSettingsStore.getState().language);
+      const report = await weatherApi.get(language);
       set({ weather: report });
     } catch (error) {
       set({

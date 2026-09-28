@@ -22,6 +22,12 @@ mod domain;
 mod providers;
 mod services;
 mod state;
+#[cfg(windows)]
+mod clock_hover;
+#[cfg(windows)]
+mod date_format;
+#[cfg(windows)]
+mod taskbar_clock;
 
 use state::AppState;
 
@@ -33,8 +39,8 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        GetWindowRect, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint,
-        GA_ROOT, HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
+        HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
 
@@ -55,10 +61,15 @@ fn is_taskbar_clock(point: POINT) -> bool {
         return false;
     }
 
+    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    if root.is_invalid() || !taskbar_clock::is_taskbar_class(&class_name(root)) {
+        return false;
+    }
+
     let mut current = hwnd;
     for _ in 0..8 {
         let name = class_name(current);
-        if name.contains("Clock") || name.contains("DateTime") || name == "TrayClockWClass" {
+        if matches!(name.as_str(), "TrayClockWClass" | "ClockButton") {
             return true;
         }
         current = unsafe { GetParent(current) }.unwrap_or_default();
@@ -67,26 +78,7 @@ fn is_taskbar_clock(point: POINT) -> bool {
         }
     }
 
-    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
-    if root.is_invalid() || class_name(root) != "Shell_TrayWnd" {
-        return false;
-    }
-
-    let mut rect = windows::Win32::Foundation::RECT::default();
-    if unsafe { GetWindowRect(root, &mut rect) }.is_err() {
-        return false;
-    }
-
-    // Explorer does not expose a stable clock control class across Windows versions.
-    // Limit the fallback hit area to the taskbar's clock-side edge instead of the
-    // complete taskbar, so notification and system-tray clicks remain untouched.
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
-    let near_bottom = point.y >= rect.bottom - 80 && point.x >= rect.right - 220;
-    let near_top = point.y <= rect.top + 80 && point.x >= rect.right - 220;
-    let near_right = point.x >= rect.right - 80 && point.y >= rect.bottom - 220;
-    let near_left = point.x <= rect.left + 80 && point.y >= rect.bottom - 220;
-    (width > height && (near_bottom || near_top)) || (height >= width && (near_right || near_left))
+    taskbar_clock::contains(root, point)
 }
 
 #[cfg(windows)]
@@ -115,10 +107,18 @@ unsafe extern "system" fn mouse_hook(code: i32, message: WPARAM, data: LPARAM) -
 
 #[cfg(windows)]
 fn start_mouse_hook(app: tauri::AppHandle) {
+    let main_hwnd = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+        .map(|hwnd| hwnd.0 as usize);
     let _ = APP_HANDLE.set(app);
-    std::thread::spawn(|| {
+    taskbar_clock::start_tracking();
+    std::thread::spawn(move || {
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) };
         let Ok(hook) = hook else { return };
+        if let Some(hwnd) = main_hwnd {
+            clock_hover::start(HWND(hwnd as *mut _));
+        }
         let mut message = MSG::default();
         while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
             unsafe {
@@ -166,10 +166,20 @@ fn show_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
     }
 }
 
+fn hide_main_panel(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
+    for label in ["main", "detail", "clock"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.hide();
+        }
+    }
+}
+
 fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
+            hide_main_panel(app);
         } else {
             show_calendar_at(app, x, y);
         }
@@ -420,8 +430,7 @@ fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
             "calendar tray: toggle visible={visible}, active_space={on_active_space}, focused={focused}"
         );
         if visible && on_active_space {
-            MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
-            let _ = window.hide();
+            hide_main_panel(app);
         } else {
             show_calendar_below_tray(app, rect);
         }
@@ -508,11 +517,20 @@ fn show_update_panel(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) -> Result<(), String> {
-    let (label, title, width, height) = match panel.as_str() {
-        "detail" => ("detail", "日期详情", 350.0, 600.0),
-        "clock" => ("clock", "世界时间", 520.0, 300.0),
+async fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) -> Result<(), String> {
+    let (label, title, width) = match panel.as_str() {
+        "detail" => ("detail", "日期详情", 350.0),
+        "clock" => ("clock", "世界时间", 520.0),
         _ => return Err("未知面板".into()),
+    };
+    let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
+    let scale = main.scale_factor().map_err(|error| error.to_string())?;
+    let main_pos = main.outer_position().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
+    let main_size = main.outer_size().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
+    let height = if label == "detail" {
+        main.inner_size().map_err(|error| error.to_string())?.to_logical::<f64>(scale).height
+    } else {
+        300.0
     };
     if let Some(window) = app.get_webview_window(label) {
         if label == "detail" {
@@ -521,15 +539,13 @@ fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) ->
                     .map_err(|error| error.to_string())?;
             }
         }
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())?;
+        if !window.is_visible().map_err(|error| error.to_string())? {
+            window.show().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
         return Ok(());
     }
 
-    let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
-    let scale = main.scale_factor().map_err(|error| error.to_string())?;
-    let main_pos = main.outer_position().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
-    let main_size = main.outer_size().map_err(|error| error.to_string())?.to_logical::<f64>(scale);
     let (left, top, right, bottom) = if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
         #[cfg(target_os = "macos")]
         let (position, size) = (monitor.work_area().position, monitor.work_area().size);
@@ -550,9 +566,9 @@ fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<String>) ->
     }.clamp(left, (right - width).max(left));
     let y = main_pos.y.clamp(top, (bottom - height).max(top));
     let url = if label == "detail" {
-        format!("index.html?panel=detail&date={}", date.unwrap_or_default())
+        format!("?panel=detail&date={}", date.unwrap_or_default())
     } else {
-        "index.html?panel=clock".to_string()
+        "?panel=clock".to_string()
     };
     let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
         .title(title)
@@ -699,7 +715,17 @@ mod huangli_tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            date_format::taskbar_date_format_get,
+            #[cfg(windows)]
+            date_format::taskbar_date_format_preview,
+            #[cfg(windows)]
+            date_format::taskbar_date_format_set,
             #[cfg(target_os = "macos")]
             menu_bar_style_get,
             #[cfg(target_os = "macos")]
@@ -707,6 +733,8 @@ pub fn run() {
             quit_app,
             show_update_panel,
             commands::update::check_for_updates,
+            commands::autostart::autostart_get,
+            commands::autostart::autostart_set,
             open_aux_panel,
             close_aux_panel,
             commands::world_time::world_time_list_cities,
@@ -780,7 +808,11 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == "main" {
+                        hide_main_panel(window.app_handle());
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
                 #[cfg(target_os = "macos")]
                 tauri::WindowEvent::Focused(true) if window.label() == "main" => {
@@ -818,8 +850,7 @@ pub fn run() {
                                             && !main.is_focused().unwrap_or(false) {
                                             #[cfg(debug_assertions)]
                                             eprintln!("calendar tray: hiding unfocused main panel");
-                                            let _ = main.hide();
-                                            MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
+                                            hide_main_panel(window.app_handle());
                                         }
                                     }
                                 }
@@ -833,7 +864,11 @@ pub fn run() {
                             .is_some_and(|aux| aux.is_visible().unwrap_or(false))
                     });
                     if window.label() != "main" || !aux_visible {
-                        let _ = window.hide();
+                        if window.label() == "main" {
+                            hide_main_panel(window.app_handle());
+                        } else {
+                            let _ = window.hide();
+                        }
                     }
                     }
                 }

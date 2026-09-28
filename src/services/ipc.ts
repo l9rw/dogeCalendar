@@ -36,6 +36,16 @@ export type CachedWeather = {
   is_day: boolean;
   location_label: string;
   fetched_at: number;
+  forecast: WeatherForecast[];
+};
+
+export type WeatherForecast = {
+  date: string;
+  temperature_max: number;
+  temperature_min: number;
+  weather_code: number;
+  description: string;
+  icon: string;
 };
 
 export type WeatherReport = {
@@ -43,6 +53,20 @@ export type WeatherReport = {
   from_cache: boolean;
   stale: boolean;
 };
+
+export type UpdateCheck = {
+  currentVersion: string;
+  hasRelease: boolean;
+  release: { version: string; url: string } | null;
+};
+
+export type UpdateStatus =
+  | "idle"
+  | "checking"
+  | "current"
+  | "unreleased"
+  | "available"
+  | "error";
 
 export const worldTimeApi = {
   listCities: () => invoke<City[]>("world_time_list_cities"),
@@ -67,6 +91,16 @@ export const locationApi = {
 };
 
 export const weatherApi = {
-  get: () => invoke<WeatherReport>("weather_get"),
+  get: (language?: string) => invoke<WeatherReport>("weather_get", { language }),
   clearCache: () => invoke<void>("weather_clear_cache"),
+};
+
+export const autostartApi = {
+  get: () => invoke<boolean>("autostart_get"),
+  set: (enabled: boolean) => invoke<boolean>("autostart_set", { enabled }),
+};
+
+export const updateApi = {
+  check: (includeBeta: boolean) =>
+    invoke<UpdateCheck>("check_for_updates", { includeBeta }),
 };
