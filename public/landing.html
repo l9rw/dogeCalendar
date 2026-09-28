@@ -145,17 +145,26 @@
       .platform-tab[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px #0001; }
       .platform-card[hidden], .scene-calendar[hidden], .scene-days[hidden], .scene-detail[hidden] { display: none !important; }
       .platform-card { display: flex; flex-direction: column; padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); }
-      .platform-scene { position: relative; width: 100%; aspect-ratio: 1200 / 740; margin: 20px 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; container-type: inline-size; background: var(--scene-desktop) center / 100% 100% no-repeat; }
-      .platform-scene.windows { --scene-desktop: url("./windows-desktop-light.png"); --scene-cover-top: 24.3%; --scene-cover-left: 63.55%; --scene-cover-y: 76%; }
-      .platform-scene.mac { --scene-desktop: url("./macos-desktop-light.png"); --scene-cover-top: 6.45%; --scene-cover-left: 61.15%; --scene-cover-y: 20%; }
-      [data-theme="dark"] .platform-scene.windows { --scene-desktop: url("./windows-desktop-dark.png"); }
-      [data-theme="dark"] .platform-scene.mac { --scene-desktop: url("./macos-desktop-dark.png"); }
-      .platform-scene::before { content: ""; position: absolute; z-index: 1; top: var(--scene-cover-top); left: var(--scene-cover-left); width: 35%; height: 67.9%; background: var(--scene-desktop) 40% var(--scene-cover-y) / 285.714% 147.275% no-repeat; pointer-events: none; }
+      .platform-scene { position: relative; width: 100%; aspect-ratio: 1200 / 740; margin: 20px 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; container-type: inline-size; background-position: center; background-size: cover; }
+      .platform-scene.windows { background-image: url("./win11-wallpaper.jpg"); }
+      .platform-scene.mac { background-image: url("./macos27-wallpaper.jpg"); }
+      .scene-system-bar { position: absolute; z-index: 1; display: flex; align-items: center; color: #253345; pointer-events: none; }
+      .windows .scene-system-bar { inset: auto 0 0; height: 6.5%; justify-content: center; gap: 1cqw; background: #dce4efec; }
+      .windows .scene-system-bar img { width: 2.5cqw; height: 2.5cqw; object-fit: contain; }
+      .windows .scene-system-bar time { position: absolute; right: 1.4%; color: #333d51; font-size: 1cqw; line-height: 1.15; text-align: right; }
+      .mac .scene-system-bar { inset: 0 0 auto; height: 5%; gap: 1.65cqw; padding: 0 1.6cqw; background: #e8edf0b8; font-size: 1.1cqw; font-weight: 650; }
+      .mac .scene-system-bar time { margin-left: auto; }
+      .mac .scene-menu-icon { position: absolute; right: 20%; width: 1.65cqw; height: 1.65cqw; border-radius: .35cqw; }
+      .scene-dock { position: absolute; z-index: 1; bottom: 1.3%; left: 50%; display: flex; gap: .65cqw; padding: .55cqw .85cqw; border: 1px solid #ffffffa8; border-radius: 1.2cqw; background: #e9edf1a6; transform: translateX(-50%); pointer-events: none; }
+      .scene-dock img { width: 3.35cqw; height: 3.35cqw; object-fit: contain; }
+      [data-theme="dark"] .windows .scene-system-bar { background: #202b3ae8; color: #ebf0fa; }
+      [data-theme="dark"] .windows .scene-system-bar time { color: #ebf0fa; }
+      [data-theme="dark"] .mac .scene-system-bar { background: #1e2934b5; color: #f5f6fa; }
       .scene-trigger { position: absolute; z-index: 5; padding: 0; border: 0; background: transparent; cursor: pointer; }
       .scene-trigger:hover, .scene-trigger:focus-visible { outline: 2px solid #496cff; outline-offset: -2px; background: #496cff24; }
-      .mac .scene-trigger { top: 0; right: 16.5%; width: 2.5%; height: 5%; border-radius: .5cqw; }
+      .mac .scene-trigger { top: 0; right: 19.5%; width: 3%; height: 5%; border-radius: .5cqw; }
       .windows .scene-trigger { right: 0; bottom: 0; width: 8%; height: 6.5%; }
-      .scene-calendar { position: absolute; z-index: 2; width: 35%; height: 67.9%; overflow: hidden; filter: drop-shadow(0 2cqw 2.5cqw #16203b55); }
+      .scene-calendar { position: absolute; z-index: 2; width: 35%; height: 67.9%; overflow: hidden; border-radius: 1.5cqw; filter: drop-shadow(0 2cqw 2.5cqw #16203b55); }
       .windows .scene-calendar { top: 24.3%; left: 63.55%; }
       .mac .scene-calendar { top: 6.45%; left: 61.15%; }
       .scene-calendar img { position: absolute; width: 100cqw; max-width: none; height: auto; }
@@ -305,6 +314,7 @@
               <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 4.2 10.5 3v8H2V4.2Zm10-1.4L22 1.4V11H12V2.8ZM2 12.5h8.5v8L2 19.3v-6.8Zm10 0h10v9.9L12 21v-8.5Z" /></svg>Windows 11</h3>
               <div class="platform-scene windows" aria-label="Windows 11 桌面交互预览" data-i18n-aria="windowsShotAlt">
                 <button class="scene-dismiss" type="button" aria-label="收起日历" data-i18n-aria="dismissCalendar"></button>
+                <div class="scene-system-bar" aria-hidden="true"><img src="./taskbar-start.svg" alt="" /><img src="./taskbar-search.svg" alt="" /><img src="./taskbar-explorer.svg" alt="" /><img src="./icon.png" alt="" /><time>09:41<br />2026/9/28</time></div>
                 <button class="scene-trigger" type="button" aria-expanded="false" aria-label="点击任务栏时间打开日历" data-i18n-aria="windowsTrigger"></button>
                 <div class="scene-calendar" hidden><img class="platform-shot" data-scene-image="windows" src="./windows-desktop-light.png" width="1200" height="740" alt="dogeCalendar 月历" loading="lazy" /></div>
                 <div class="scene-days" hidden></div>
@@ -327,6 +337,8 @@
               <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 12.9c0-2.1 1.7-3.1 1.8-3.2-1-1.5-2.4-1.7-2.9-1.8-1.2-.1-2.3.7-2.9.7-.6 0-1.5-.7-2.5-.7-1.3 0-2.6.8-3.3 1.9-1.4 2.4-.4 5.8 1 7.8.7 1 1.4 2.1 2.4 2.1.9 0 1.3-.6 2.5-.6s1.5.6 2.5.6 1.7-1 2.4-2c.8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-2.5Zm-2.1-6.1c.6-.7 1-1.6.9-2.6-.8 0-1.8.5-2.4 1.2-.5.6-1 1.6-.9 2.5.9.1 1.8-.4 2.4-1.1Z" /></svg>macOS 27</h3>
               <div class="platform-scene mac" aria-label="macOS 桌面交互预览" data-i18n-aria="macShotAlt">
                 <button class="scene-dismiss" type="button" aria-label="收起日历" data-i18n-aria="dismissCalendar"></button>
+                <div class="scene-system-bar" aria-hidden="true"><span>●</span><span>dogeCalendar</span><span>File</span><span>Edit</span><span>View</span><img class="scene-menu-icon" src="./icon.png" alt="" /><time>Mon Sep 28 09:41</time></div>
+                <div class="scene-dock" aria-hidden="true"><img src="./dock-finder.png" alt="" /><img src="./dock-safari.png" alt="" /><img src="./dock-calendar.png" alt="" /><img src="./dock-mail.png" alt="" /><img src="./icon.png" alt="" /></div>
                 <button class="scene-trigger" type="button" aria-expanded="false" aria-label="点击菜单栏图标打开日历" data-i18n-aria="macTrigger"></button>
                 <div class="scene-calendar" hidden><img class="platform-shot" data-scene-image="macos" src="./macos-desktop-light.png" width="1200" height="740" alt="dogeCalendar 月历" loading="lazy" /></div>
                 <div class="scene-days" hidden></div>
