@@ -184,7 +184,6 @@ export function SettingsPanel({
     <section className="settings-panel" aria-label={t("settings.title")}>
       <div className="settings-header">
         <div>
-          <p className="eyebrow">CALENDAR SETTINGS</p>
           <h2>{t(titleKey)}</h2>
         </div>
         <button className="settings-close" onClick={onClose} aria-label={t("settings.close")}>×</button>
