@@ -414,16 +414,19 @@ fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
 
     if let Some(monitor) = monitor {
         // Tauri's macOS work area comes from NSScreen.visibleFrame.
+        const SAFE_MARGIN: f64 = 12.0;
         let work_area = monitor.work_area();
         let origin = work_area.position.to_logical::<f64>(scale);
         let size = work_area.size.to_logical::<f64>(scale);
+        let left = origin.x + SAFE_MARGIN;
+        let top = origin.y + SAFE_MARGIN;
         x = x.clamp(
-            origin.x,
-            (origin.x + size.width - window_size.width).max(origin.x),
+            left,
+            (origin.x + size.width - window_size.width - SAFE_MARGIN).max(left),
         );
         y = y.clamp(
-            origin.y,
-            (origin.y + size.height - window_size.height).max(origin.y),
+            top,
+            (origin.y + size.height - window_size.height - SAFE_MARGIN).max(top),
         );
     }
 
