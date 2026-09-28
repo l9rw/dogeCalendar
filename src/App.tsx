@@ -3,73 +3,116 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { getCalendarMeta, dateKey } from "./services/calendarData";
+import { fetchHolidayYear, getCalendarMeta, dateKey, type HolidayYear } from "./services/calendarData";
 import { fetchHuangli, type Huangli } from "./services/huangli";
 import { useInfoStore } from "./stores/infoStore";
-import type { WeatherReport } from "./services/ipc";
+import {
+  useSettingsStore,
+  effectiveAppearance,
+  resolveLanguage,
+  type Theme,
+} from "./stores/settingsStore";
+import { translator } from "./data/i18n";
+import type { WeatherReport, UpdateCheck, UpdateStatus } from "./services/ipc";
+import { updateApi } from "./services/ipc";
 import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
+import { SettingsPanel } from "./components/SettingsPanel";
 
 type CalendarDay = {
   date: Date;
   lunarLabel: string;
   label?: string;
   holiday?: string;
+  holidayType: "holiday" | "rest" | "workday" | "none";
   isCurrentMonth: boolean;
   isToday: boolean;
   isWeekend: boolean;
   isRest: boolean;
   isWorkday: boolean;
-  holidayType: "holiday" | "rest" | "workday" | "none";
+  weekNumber?: number;
 };
 
-const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
 type CalendarView = "month" | "year";
-type ThemeMode = "light" | "dark" | "system";
-type MenuBarStyle = "calendar" | "date" | "weekday_date";
-const THEME_KEY = "calendar-theme";
 const IGNORED_UPDATE_KEY = "calendar-ignored-update";
 const REPOSITORY_URL = "https://github.com/l9rw/dogeCalendar";
-type UpdateCheck = { currentVersion: string; hasRelease: boolean; release: { version: string; url: string } | null };
-let startupUpdateCheck: Promise<UpdateCheck> | undefined;
 
-export function resolveTheme(mode: ThemeMode, systemDark: boolean): "light" | "dark" {
-  return mode === "system" ? (systemDark ? "dark" : "light") : mode;
-}
-
-function useThemeMode() {
-  const [mode, setMode] = useState<ThemeMode>(() => (localStorage.getItem(THEME_KEY) as ThemeMode) || "system");
+function useAppearanceEffect() {
+  const theme = useSettingsStore((state) => state.theme);
+  const appearance = useSettingsStore((state) => state.appearance);
+  const language = useSettingsStore((state) => state.language);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+
   useEffect(() => {
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    const onVisibility = () => { if (!document.hidden) setSystemDark(mql.matches); };
+    const onFocus = () => setSystemDark(mql.matches);
     mql.addEventListener("change", handler);
-    return () => mql.removeEventListener("change", handler);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      mql.removeEventListener("change", handler);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
-  const effective = resolveTheme(mode, systemDark);
+
+  const { dark, accent, background } = effectiveAppearance(theme, systemDark, appearance);
   useEffect(() => {
-    document.documentElement.dataset.theme = effective;
-  }, [effective]);
-  const changeTheme = (next: ThemeMode) => {
-    setMode(next);
-    localStorage.setItem(THEME_KEY, next);
-  };
-  return { mode, changeTheme };
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }, [dark]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--blue", accent);
+    root.style.setProperty("--chip-soft", `color-mix(in srgb, ${accent} 14%, transparent)`);
+    root.style.setProperty("--shell-border", `color-mix(in srgb, ${accent} 32%, var(--line))`);
+    root.style.setProperty("--surface-3", `color-mix(in srgb, ${accent} 9%, var(--surface-2))`);
+    root.style.setProperty("--shell-bg", background);
+  }, [accent, background]);
+  useEffect(() => {
+    document.documentElement.dataset.lang = resolveLanguage(language);
+  }, [language]);
+
+  return { dark, systemDark };
 }
 
-function startOfCalendarGrid(year: number, month: number) {
+function weekdayKeys() {
+  return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+}
+
+function orderedWeekdays(weekStart: number) {
+  const keys = weekdayKeys();
+  return Array.from({ length: 7 }, (_, index) => (weekStart + index) % 7);
+}
+
+function startOfCalendarGrid(year: number, month: number, weekStart: number) {
   const first = new Date(year, month, 1);
-  return new Date(year, month, 1 - ((first.getDay() + 6) % 7));
+  const offset = (first.getDay() - weekStart + 7) % 7;
+  return new Date(year, month, 1 - offset);
 }
 
-function buildMonth(year: number, month: number): CalendarDay[] {
-  const start = startOfCalendarGrid(year, month);
+function isoWeekOfYear(date: Date): number {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  return Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+function buildMonth(
+  year: number,
+  month: number,
+  holidayYears: Record<number, HolidayYear>,
+  weekStart: number,
+  showWeekNumbers: boolean,
+): CalendarDay[] {
+  const start = startOfCalendarGrid(year, month, weekStart);
   const today = new Date();
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
-    const day = date.getDate();
-    const meta = getCalendarMeta(date);
+    const meta = getCalendarMeta(date, holidayYears);
     return {
       date,
       lunarLabel: meta.lunarDay === "初一" ? meta.lunar.slice(0, -meta.lunarDay.length) : meta.lunarDay || meta.lunar,
@@ -78,19 +121,68 @@ function buildMonth(year: number, month: number): CalendarDay[] {
       isCurrentMonth: date.getMonth() === month,
       isToday: date.toDateString() === today.toDateString(),
       isWeekend: date.getDay() === 0 || date.getDay() === 6,
-      isRest: (meta.holidayStatus === "rest" || meta.holidayStatus === "holiday") && Boolean(meta.holiday),
-      isWorkday: meta.holidayStatus === "workday" && Boolean(meta.holiday),
+      isRest: meta.holidayStatus === "rest" || meta.holidayStatus === "holiday",
+      isWorkday: meta.holidayStatus === "workday",
       holidayType: meta.holidayType,
+      weekNumber: showWeekNumbers && index % 7 === 0 ? isoWeekOfYear(date) : undefined,
     };
   });
 }
 
+function CurrentDateTime() {
+  const language = useSettingsStore((state) => state.language);
+  const { t } = useMemo(() => translator(language), [language]);
+  const [current, setCurrent] = useState(() => new Date());
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const tick = () => {
+      setCurrent(new Date());
+      timer = window.setTimeout(tick, 1000 - (Date.now() % 1000));
+    };
+    const onVisibility = () => {
+      window.clearTimeout(timer);
+      if (!document.hidden) tick();
+    };
+    if (!document.hidden) timer = window.setTimeout(tick, 1000 - (Date.now() % 1000));
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  const time = [current.getHours(), current.getMinutes(), current.getSeconds()]
+    .map((part) => String(part).padStart(2, "0")).join(":");
+  const weekdayKey = weekdayKeys()[current.getDay()];
+  const weekday = t(`weekday.full.${weekdayKey}`);
+
+  return (
+    <section className="current-datetime" aria-label={t("today")}>
+      <div className="current-date">
+        <span>{t("today")} · {weekday}</span>
+        <strong>{current.getFullYear()}年{current.getMonth() + 1}月{current.getDate()}日</strong>
+      </div>
+      <time className="current-time" dateTime={`${dateKey(current)}T${time}`}>{time}</time>
+    </section>
+  );
+}
+
+function parseDetailDate(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) || dateKey(date) !== value ? new Date() : date;
+}
+
 function DetailPanel() {
+  const language = useSettingsStore((state) => state.language);
+  const { t } = useMemo(() => translator(language), [language]);
   const [selected, setSelected] = useState(() => {
     const date = new URLSearchParams(window.location.search).get("date");
-    return date ? new Date(`${date}T12:00:00`) : new Date();
+    return parseDetailDate(date);
   });
   const [huangli, setHuangli] = useState<Huangli | null>(null);
+  const [huangliDate, setHuangliDate] = useState<string | null>(null);
   const [huangliLoading, setHuangliLoading] = useState(false);
   const selectedKey = dateKey(selected);
   const selectedMeta = getCalendarMeta(selected);
@@ -98,60 +190,66 @@ function DetailPanel() {
   useEffect(() => {
     let disposed = false;
     const listener = listen<string>("detail-date-changed", (event) => {
-      if (!disposed) setSelected(new Date(`${event.payload}T12:00:00`));
+      if (!disposed) setSelected(parseDetailDate(event.payload));
     });
     return () => { disposed = true; listener.then((dispose) => dispose()); };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    setHuangli(null);
     setHuangliLoading(true);
     fetchHuangli(selectedKey)
-      .then((data) => { if (!cancelled) setHuangli(data); })
-      .catch(() => { if (!cancelled) setHuangli(null); })
+      .then((data) => { if (!cancelled) { setHuangli(data); setHuangliDate(selectedKey); } })
+      .catch(() => { if (!cancelled) { setHuangli(null); setHuangliDate(selectedKey); } })
       .finally(() => { if (!cancelled) setHuangliLoading(false); });
     return () => { cancelled = true; };
   }, [selectedKey]);
 
+  const activeHuangli = huangliDate === selectedKey ? huangli : null;
+
   return (
-    <main className="aux-shell detail-panel" aria-label="日期详情">
-      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel: "detail" })} aria-label="关闭">×</button>
-      <WeatherCard />
+    <main className="aux-shell detail-panel" aria-label={t("dateDetail")}>
+      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel: "detail" })} aria-label={t("settings.close")}>×</button>
       <div className="detail-topline">
-        <span className="detail-caption">日期详情</span>
-        {selected.toDateString() === new Date().toDateString() && <span className="today-badge">今天</span>}
+        <img className="detail-mascot" src="/icon.png" alt="Doge" />
+        {selected.toDateString() === new Date().toDateString() && <span className="today-badge">{t("today")}</span>}
       </div>
       <div className="detail-date">
         <span className="detail-day">{selected.getDate()}</span>
         <div>
           <strong>{selected.getFullYear()}年{selected.getMonth() + 1}月</strong>
-          <span>{["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][selected.getDay()]}</span>
+          <span>{t(`weekday.full.${weekdayKeys()[selected.getDay()]}`)}</span>
         </div>
       </div>
-      <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>农历</span></div>
+      <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>{t("lunar")}</span></div>
+      <WeatherCard />
       <div className="detail-divider" />
-      <div className="detail-section"><span className="section-label">宜</span><p className="yi-list">{huangli?.yi?.length ? huangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
-      <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p className="ji-list">{huangli?.ji?.length ? huangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
+      <div className="detail-almanac">
+        <div className="detail-section"><span className="section-label">宜</span><p>{activeHuangli?.yi?.length ? activeHuangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
+        <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p>{activeHuangli?.ji?.length ? activeHuangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
+      </div>
       <div className="huangli-meta">
-        {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
-        {huangli?.shengxiao && <span><i>生肖</i>{huangli.shengxiao}</span>}
-        {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
-        {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
+        {activeHuangli?.ganzhi && <span><i>干支</i>{activeHuangli.ganzhi}</span>}
+        {activeHuangli?.shengxiao && <span><i>生肖</i>{activeHuangli.shengxiao}</span>}
+        {activeHuangli?.xingzuo && <span><i>星座</i>{activeHuangli.xingzuo}</span>}
+        {activeHuangli?.jieqi && <span><i>节气</i>{activeHuangli.jieqi}</span>}
         {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
       </div>
-      <div className="side-holiday-card">
-        {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
-        {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
-        {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
-        {!huangli && !huangliLoading && <div className="holiday-lines"><p><i className="dark-icon">·</i>黄历接口暂时不可用</p></div>}
-      </div>
+      {(activeHuangli?.zhushen || activeHuangli?.taishen || activeHuangli?.pengsheng || (!activeHuangli && !huangliLoading)) && (
+        <div className="side-holiday-card">
+          {activeHuangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {activeHuangli.zhushen}</p></div>}
+          {activeHuangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{activeHuangli.taishen}</p></div>}
+          {activeHuangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{activeHuangli.pengsheng}</p></div>}
+          {!activeHuangli && !huangliLoading && <div className="holiday-lines"><p>黄历接口暂时不可用</p></div>}
+        </div>
+      )}
     </main>
   );
 }
 
 function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
-  useThemeMode();
+  const { t } = useTranslator();
+  useAppearanceEffect();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") invoke("close_aux_panel", { panel });
@@ -161,14 +259,30 @@ function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
   }, [panel]);
   useEffect(() => {
     if (panel !== "clock") return;
-    const tick = () => { if (!document.hidden) void useInfoStore.getState().loadClocks(); };
-    const timer = window.setInterval(tick, 15000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const start = () => {
+      if (timer === undefined && !document.hidden) {
+        timer = window.setInterval(() => void useInfoStore.getState().loadClocks(), 15000);
+      }
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [panel]);
   if (panel === "detail") return <DetailPanel />;
   return (
-    <main className="aux-shell clock-panel" aria-label="世界时间">
-      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel })} aria-label="关闭">×</button>
+    <main className="aux-shell clock-panel" aria-label={t("worldTime")}>
+      <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel })} aria-label={t("settings.close")}>×</button>
       <WorldClockStrip />
     </main>
   );
@@ -183,53 +297,66 @@ export function App() {
 function CalendarApp() {
   const isMac = document.documentElement.dataset.platform === "macos";
   const now = new Date();
+  const { t } = useTranslator();
+  const theme = useSettingsStore((state) => state.theme);
+  const calendar = useSettingsStore((state) => state.calendar);
+  const updatePrefs = useSettingsStore((state) => state.update);
   const [cursor, setCursor] = useState(new Date(2026, 8, 1));
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
   const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [infoPanel, setInfoPanel] = useState<"update" | "about" | null>(null);
+  const [settingsView, setSettingsView] = useState<"menu" | "update">("menu");
+  const [infoPanel, setInfoPanel] = useState<"about" | null>(null);
   const [appVersion, setAppVersion] = useState("");
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "current" | "unreleased" | "available" | "error">("idle");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateRelease, setUpdateRelease] = useState<UpdateCheck["release"]>(null);
   const [updateError, setUpdateError] = useState("");
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
-  const [menuBarStyle, setMenuBarStyle] = useState<MenuBarStyle>("calendar");
-  const [manualLat, setManualLat] = useState("");
-  const [manualLon, setManualLon] = useState("");
-  const [manualLabel, setManualLabel] = useState("");
-  const setManualLocation = useInfoStore((state) => state.setManualLocation);
-  const clearLocation = useInfoStore((state) => state.clearLocation);
-  const clearWeatherCache = useInfoStore((state) => state.clearWeatherCache);
-  const { mode: themeMode, changeTheme } = useThemeMode();
-  const days = useMemo(() => buildMonth(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+  const [holidayYears, setHolidayYears] = useState<Record<number, HolidayYear>>({});
+  useAppearanceEffect();
+  const days = useMemo(
+    () => buildMonth(cursor.getFullYear(), cursor.getMonth(), holidayYears, calendar.weekStart, calendar.showWeekNumbers),
+    [cursor, holidayYears, calendar.weekStart, calendar.showWeekNumbers],
+  );
+
+  useEffect(() => {
+    let active = true;
+    void fetchHolidayYear(cursor.getFullYear()).then((data) => {
+      if (active && data) setHolidayYears((current) => ({ ...current, [cursor.getFullYear()]: data }));
+    });
+    return () => { active = false; };
+  }, [cursor]);
 
   useEffect(() => {
     void getVersion().then(setAppVersion).catch(console.error);
     let active = true;
-    startupUpdateCheck ??= invoke<UpdateCheck>("check_for_updates");
-    void startupUpdateCheck.then(async ({ release, currentVersion }) => {
+    if (!updatePrefs.autoCheck) return;
+    void updateApi.check(updatePrefs.includeBeta).then(async ({ release, currentVersion }) => {
       if (active) setAppVersion(currentVersion);
       if (!active || !release || localStorage.getItem(IGNORED_UPDATE_KEY) === release.version) return;
       setUpdateRelease(release);
       setUpdateStatus("available");
-      setShowSettings(false);
       setContextMenu(false);
-      setInfoPanel("update");
+      setInfoPanel(null);
+      setShowSettings(true);
+      setSettingsView("update");
       await invoke("show_update_panel");
     }).catch((error) => console.error("启动时检查更新失败", error));
     return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUpdates = async () => {
     setContextMenu(false);
-    setShowSettings(false);
     setShowToolbarMenu(false);
-    setInfoPanel("update");
+    setInfoPanel(null);
+    setShowSettings(true);
+    setSettingsView("update");
     setUpdateStatus("checking");
     setUpdateError("");
     try {
-      const result = await invoke<UpdateCheck>("check_for_updates");
+      const result = await updateApi.check(updatePrefs.includeBeta);
       setAppVersion(result.currentVersion);
       setUpdateRelease(result.release);
       setUpdateStatus(result.release ? "available" : result.hasRelease ? "current" : "unreleased");
@@ -239,6 +366,18 @@ function CalendarApp() {
     }
   };
 
+  const ignoreUpdate = () => {
+    if (updateRelease) localStorage.setItem(IGNORED_UPDATE_KEY, updateRelease.version);
+    setShowSettings(false);
+  };
+
+  const openSettings = () => {
+    setContextMenu(false);
+    setInfoPanel(null);
+    setShowSettings(true);
+    setSettingsView("menu");
+  };
+
   const showAbout = () => {
     setContextMenu(false);
     setShowSettings(false);
@@ -246,26 +385,12 @@ function CalendarApp() {
     setInfoPanel("about");
   };
 
-  useEffect(() => {
-    if (!isMac) return;
-    let active = true;
-    void invoke<MenuBarStyle>("menu_bar_style_get").then((style) => {
-      if (active) setMenuBarStyle(style);
-    }).catch(console.error);
-    return () => { active = false; };
-  }, [isMac]);
-
-  const changeMenuBarStyle = async (style: MenuBarStyle) => {
-    try {
-      await invoke("menu_bar_style_set", { style });
-      setMenuBarStyle(style);
-    } catch (error) {
-      console.error("无法更新菜单栏图标", error);
-    }
-  };
-
   const moveMonth = (offset: number) => {
     setCursor((value) => new Date(value.getFullYear(), value.getMonth() + offset, 1));
+  };
+
+  const moveYear = (offset: number) => {
+    setCursor((value) => new Date(value.getFullYear() + offset, value.getMonth(), 1));
   };
 
   const selectDate = (date: Date) => {
@@ -274,6 +399,26 @@ function CalendarApp() {
     void invoke("open_aux_panel", { panel: "detail", date: dateKey(date) });
   };
 
+  useEffect(() => {
+    if (!calendar.keyboardShortcut) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (showSettings || contextMenu || infoPanel) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+      switch (event.key) {
+        case "ArrowLeft": event.preventDefault(); moveMonth(-1); break;
+        case "ArrowRight": event.preventDefault(); moveMonth(1); break;
+        case "ArrowUp": event.preventDefault(); moveYear(-1); break;
+        case "ArrowDown": event.preventDefault(); moveYear(1); break;
+        case " ": event.preventDefault(); selectDate(new Date()); break;
+        default: break;
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendar.keyboardShortcut, showSettings, contextMenu, infoPanel]);
+
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
     if (Math.abs(event.deltaY) >= 8) moveMonth(event.deltaY < 0 ? -1 : 1);
   };
@@ -281,23 +426,28 @@ function CalendarApp() {
   const selectedKey = selected.toDateString();
 
   useEffect(() => {
-    const disposers: Array<() => void> = [];
-    listen("taskbar-calendar-click", () => {
+    const listeners = [
+      listen("taskbar-calendar-click", () => {
       setContextMenu(false);
       setShowSettings(false);
       setInfoPanel(null);
-    }).then((dispose) => disposers.push(dispose));
-    listen("taskbar-calendar-context", () => {
+      }),
+      listen("taskbar-calendar-context", () => {
       setContextMenu(true);
       setShowSettings(false);
       setInfoPanel(null);
-    }).then((dispose) => disposers.push(dispose));
-    listen("open-settings", () => {
-      setContextMenu(false);
-      setInfoPanel(null);
-      setShowSettings(true);
-    }).then((dispose) => disposers.push(dispose));
-    return () => disposers.forEach((dispose) => dispose());
+      }),
+      listen("open-settings", () => {
+      openSettings();
+      }),
+    ];
+    return () => {
+      void Promise.allSettled(listeners).then((results) => {
+        results.forEach((result) => {
+          if (result.status === "fulfilled") result.value();
+        });
+      });
+    };
   }, []);
 
   useEffect(() => {
@@ -337,125 +487,63 @@ function CalendarApp() {
     };
   }, []);
 
+  const weekdayOrder = orderedWeekdays(calendar.weekStart);
+  const showLunar = calendar.showLunar;
+  const showHolidays = calendar.showHolidays;
+
   return (
     <main className="calendar-shell">
       {contextMenu ? (
         <div className="taskbar-context-menu" role="menu">
-          <button role="menuitem" onClick={() => setContextMenu(false)}>打开日历</button>
-          <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>设置</button>
-          {isMac && <button role="menuitem" onClick={() => { setShowSettings(true); setContextMenu(false); }}>标题栏设置</button>}
-          <button role="menuitem" onClick={() => void checkUpdates()}>在线更新</button>
-          <button role="menuitem" onClick={showAbout}>关于</button>
-          <button role="menuitem" onClick={() => invoke("quit_app")}>退出</button>
+          <button role="menuitem" onClick={() => setContextMenu(false)}>{t("menu.openCalendar")}</button>
+          <button role="menuitem" onClick={openSettings}>{t("menu.settings")}</button>
+          {isMac && <button role="menuitem" onClick={openSettings}>{t("menu.menubarSettings")}</button>}
+          <button role="menuitem" onClick={() => void checkUpdates()}>{t("menu.onlineUpdate")}</button>
+          <button role="menuitem" onClick={showAbout}>{t("menu.about")}</button>
+          <button role="menuitem" onClick={() => invoke("quit_app")}>{t("menu.quit")}</button>
         </div>
       ) : infoPanel ? (
-        <section className="settings-panel info-panel" aria-label={infoPanel === "about" ? "关于" : "在线更新"}>
+        <section className="settings-panel info-panel" aria-label={t("settings.about")}>
           <div className="settings-header">
-            <div><p className="eyebrow">{infoPanel === "about" ? "ABOUT dogeCalendar" : "SOFTWARE UPDATE"}</p><h2>{infoPanel === "about" ? "关于" : "在线更新"}</h2></div>
-            <button className="settings-close" aria-label="关闭" onClick={() => setInfoPanel(null)}>×</button>
+            <div><p className="eyebrow">ABOUT dogeCalendar</p><h2>{t("settings.about")}</h2></div>
+            <button className="settings-close" aria-label={t("settings.close")} onClick={() => setInfoPanel(null)}>×</button>
           </div>
-          {infoPanel === "about" ? <>
-            <div className="info-app"><img src="/icon.png" alt="" /><div><strong>dogeCalendar</strong><span>版本 {appVersion || "获取中…"}</span></div></div>
-            <p className="settings-description">轻量桌面日历，提供农历、天气与世界时钟。</p>
-            <div className="info-actions">
-              <button className="info-button primary" onClick={() => void checkUpdates()}>检查更新</button>
-              <button className="info-button" onClick={() => void openUrl(REPOSITORY_URL)}>GitHub 仓库</button>
-            </div>
-          </> : <>
-            <p className="settings-description">当前版本：{appVersion || "获取中…"}</p>
-            <div className="update-message" role="status">
-              {updateStatus === "checking" && "正在检查 GitHub 最新发布版本…"}
-              {updateStatus === "current" && "已是最新版本。"}
-              {updateStatus === "unreleased" && "仓库目前没有公开发布的版本。"}
-              {updateStatus === "available" && updateRelease && <><strong>发现新版本 v{updateRelease.version}</strong><span>可前往 GitHub Release 下载并安装更新。</span></>}
-              {updateStatus === "error" && <>检查失败：{updateError}</>}
-              {updateStatus === "idle" && "点击检查更新以获取最新版本。"}
-            </div>
-            <div className="info-actions">
-              {updateStatus === "available" && updateRelease ? <>
-                <button className="info-button primary" onClick={() => void openUrl(updateRelease.url)}>前往更新</button>
-                <button className="info-button" onClick={() => { localStorage.setItem(IGNORED_UPDATE_KEY, updateRelease.version); setInfoPanel(null); }}>忽略此版本</button>
-              </> : <button className="info-button primary" disabled={updateStatus === "checking"} onClick={() => void checkUpdates()}>重新检查</button>}
-            </div>
-          </>}
+          <div className="info-app"><img src="/icon.png" alt="" /><div><strong>dogeCalendar</strong><span>{t("update.currentVersion")} {appVersion || "…"}</span></div></div>
+          <p className="settings-description">{t("about.tagline")}</p>
+          <div className="info-actions">
+            <button className="info-button primary" onClick={() => void checkUpdates()}>{t("update.checkNow")}</button>
+            <button className="info-button" onClick={() => void openUrl(REPOSITORY_URL)}>{t("about.repo")}</button>
+          </div>
         </section>
       ) : showSettings ? (
-        <section className="settings-panel" aria-label="设置">
-          <div className="settings-header">
-            <div><p className="eyebrow">CALENDAR SETTINGS</p><h2>设置</h2></div>
-            <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
-          </div>
-          <p className="settings-description">日历面板可由 Windows 任务栏时间控件或 macOS 菜单栏图标触发。</p>
-          <div className="settings-section">
-            <span className="section-label">外观</span>
-            <div className="theme-options">
-              {([["light", "日间模式", "始终使用浅色主题"], ["dark", "夜间模式", "始终使用深色主题"], ["system", "跟随系统", "根据系统设置自动切换"]] as const).map(([value, label, desc]) => (
-                <button key={value} className={`theme-option ${themeMode === value ? "active" : ""}`} onClick={() => changeTheme(value)}>
-                  <span className={`theme-dot ${value}`} />
-                  <span className="theme-label">{label}</span>
-                  <span className="theme-desc">{desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          {isMac && <div className="settings-section">
-            <span className="section-label">标题栏设置</span>
-            <div className="theme-options">
-              {([ ["calendar", "日历图标", "默认图标"], ["date", "显示当天的日期", "菜单栏显示今日日期"], ["weekday_date", "周几 + 日期", "上面显示周几，下面显示日期"] ] as const).map(([value, label, desc]) => (
-                <button key={value} className={`theme-option ${menuBarStyle === value ? "active" : ""}`} aria-pressed={menuBarStyle === value} onClick={() => void changeMenuBarStyle(value)}>
-                  <span className="theme-label">{label}</span>
-                  <span className="theme-desc">{desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>}
-          <div className="settings-section">
-            <span className="section-label">位置与天气</span>
-            <p className="settings-description">手动设置坐标会覆盖 IP 定位；清除后会重新使用 IP 兜底。</p>
-            <div className="location-form">
-              <input className="location-input" placeholder="纬度" value={manualLat} onChange={(event) => setManualLat(event.target.value)} inputMode="decimal" />
-              <input className="location-input" placeholder="经度" value={manualLon} onChange={(event) => setManualLon(event.target.value)} inputMode="decimal" />
-              <input className="location-input location-input-wide" placeholder="城市/地点名称" value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} />
-              <button
-                className="location-apply"
-                onClick={() => {
-                  const latitude = Number(manualLat);
-                  const longitude = Number(manualLon);
-                  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-                  setManualLocation(latitude, longitude, manualLabel || "自定义位置");
-                  setManualLat("");
-                  setManualLon("");
-                  setManualLabel("");
-                  setShowSettings(false);
-                }}
-              >
-                应用
-              </button>
-            </div>
-            <div className="location-actions">
-              <button className="location-action" onClick={() => { clearLocation(); }}>清除定位</button>
-              <button className="location-action" onClick={() => { clearWeatherCache(); }}>清除天气缓存</button>
-            </div>
-          </div>
-        </section>
-      ) : <><div className="calendar-layout">
-        <section className="calendar-area" aria-label="月视图">
+        <SettingsPanel
+          onClose={() => setShowSettings(false)}
+          onCheckUpdates={() => void checkUpdates()}
+          onIgnoreVersion={ignoreUpdate}
+          appVersion={appVersion}
+          updateStatus={updateStatus}
+          updateRelease={updateRelease}
+          updateError={updateError}
+          initialView={settingsView}
+        />
+      ) : <><CurrentDateTime /><div className="calendar-layout">
+        <section className="calendar-area" aria-label={t("settings.calendar")}>
         <header className="calendar-header">
           <div className="month-control">
-            <button aria-label="上个月" onClick={() => moveMonth(-1)}>‹</button>
+            <button aria-label={t("calendar.startWeekOn")} onClick={() => moveMonth(-1)}>‹</button>
             <select
               className="calendar-select"
-              aria-label="月份"
+              aria-label={t("settings.calendar")}
               value={cursor.getMonth()}
               onChange={(event) => setCursor(new Date(cursor.getFullYear(), Number(event.target.value), 1))}
             >
               {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{month + 1}月</option>)}
             </select>
-            <button aria-label="下个月" onClick={() => moveMonth(1)}>›</button>
+            <button aria-label={t("settings.calendar")} onClick={() => moveMonth(1)}>›</button>
           </div>
           <select
             className="calendar-select calendar-select-year"
-            aria-label="年份"
+            aria-label={t("settings.calendar")}
             value={cursor.getFullYear()}
             onChange={(event) => setCursor(new Date(Number(event.target.value), cursor.getMonth(), 1))}
           >
@@ -467,8 +555,8 @@ function CalendarApp() {
           <div className="calendar-toolbar">
             <button
               className="toolbar-icon"
-              aria-label="返回今天"
-              title="返回今天"
+              aria-label={t("today")}
+              title={t("today")}
               onClick={() => selectDate(new Date())}
             >
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -478,22 +566,9 @@ function CalendarApp() {
               </svg>
             </button>
             <button
-              className="toolbar-icon"
-              aria-label="日期详情"
-              title="日期详情"
-              onClick={() => void invoke("open_aux_panel", { panel: "detail", date: dateKey(selected) })}
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                <rect x="3.5" y="5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                <path d="M3.5 9.5h17" stroke="currentColor" strokeWidth="1.6" />
-                <path d="M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <circle cx="8.5" cy="14.5" r="1.3" fill="currentColor" />
-              </svg>
-            </button>
-            <button
               className="toolbar-icon toolbar-menu-toggle"
-              aria-label="更多"
-              title="更多"
+              aria-label={t("menu.about")}
+              title={t("menu.about")}
               aria-pressed={showToolbarMenu}
               onClick={() => setShowToolbarMenu((value) => !value)}
             >
@@ -518,21 +593,21 @@ function CalendarApp() {
                     onClick={() => { void invoke("open_aux_panel", { panel: "clock" }); setShowToolbarMenu(false); }}
                   >
                     <span className="toolbar-menu-check" />
-                    <span>世界时钟</span>
+                    <span>{t("menu.worldClock")}</span>
                   </button>
                   {isMac && <button
                     role="menuitem"
                     className="toolbar-menu-item"
-                    onClick={() => { setShowSettings(true); setShowToolbarMenu(false); }}
+                    onClick={() => { openSettings(); setShowToolbarMenu(false); }}
                   >
                     <span className="toolbar-menu-check" />
-                    <span>标题栏设置</span>
+                    <span>{t("menu.menubarSettings")}</span>
                   </button>}
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => void checkUpdates()}>
-                    <span className="toolbar-menu-check" /><span>在线更新</span>
+                    <span className="toolbar-menu-check" /><span>{t("menu.onlineUpdate")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={showAbout}>
-                    <span className="toolbar-menu-check" /><span>关于</span>
+                    <span className="toolbar-menu-check" /><span>{t("menu.about")}</span>
                   </button>
                 </div>
               </>
@@ -544,23 +619,28 @@ function CalendarApp() {
         {view === "month" ? (
           <div className="calendar-card" onWheel={handleCalendarWheel}>
             <div className="weekday-row">
-              {weekdays.map((weekday, index) => <span className={index > 4 ? "weekend-heading" : ""} key={weekday}>{weekday}</span>)}
+              {weekdayOrder.map((dayIndex) => (
+                <span className={dayIndex === 0 || dayIndex === 6 ? "weekend-heading" : ""} key={dayIndex}>
+                  {t(`weekday.${weekdayKeys()[dayIndex]}`)}
+                </span>
+              ))}
             </div>
             <div className="month-grid">
               {days.map((day) => {
                 const selectedDay = selectedKey === day.date.toDateString();
                 return (
                   <button
-                    className={`day-cell ${day.isCurrentMonth ? "" : "muted"} ${day.isWeekend ? "weekend" : ""} ${selectedDay ? "selected" : ""} ${day.isToday ? "today" : ""} ${day.isRest ? "holiday-cell" : ""} ${day.isWorkday ? "workday-cell" : ""}`}
+                    className={`day-cell ${day.isCurrentMonth ? "" : "muted"} ${day.isWeekend ? "weekend" : ""} ${selectedDay ? "selected" : ""} ${day.isToday ? "today" : ""} ${showHolidays && day.isRest ? "holiday-cell" : ""} ${showHolidays && day.isWorkday ? "workday-cell" : ""}`}
                     key={day.date.toISOString()}
                     onClick={() => selectDate(day.date)}
                     aria-current={day.isToday ? "date" : undefined}
                   >
-                    <span className="solar-day">{day.date.getDate()}{day.isWorkday && <b className="work-mark">班</b>}</span>
-                    <span className={`lunar-day ${day.holiday || day.label ? "special-day" : ""}`}>
-                      {day.holiday ?? day.label ?? day.lunarLabel}
+                    {day.weekNumber !== undefined && <b className="week-mark">{t("week")}{day.weekNumber}</b>}
+                    <span className="solar-day">{day.date.getDate()}{showHolidays && day.isWorkday && <b className="work-mark">班</b>}</span>
+                    <span className={`lunar-day ${showHolidays && (day.holiday || day.label) ? "special-day" : ""}`}>
+                      {showLunar ? (showHolidays ? (day.holiday ?? day.label ?? day.lunarLabel) : (day.label ?? day.lunarLabel)) : ""}
                     </span>
-                    {day.isRest && <b className="rest-mark">休</b>}
+                    {showHolidays && day.isRest && <b className="rest-mark">休</b>}
                   </button>
                 );
               })}
@@ -568,11 +648,11 @@ function CalendarApp() {
           </div>
         ) : (
           <div className="year-grid" aria-label={`${cursor.getFullYear()}年全年视图`}>
-            {Array.from({ length: 12 }, (_, month) => (
+             {Array.from({ length: 12 }, (_, month) => (
               <section className="mini-month" key={month}>
                 <button className="mini-month-title" onClick={() => { setCursor(new Date(cursor.getFullYear(), month, 1)); setView("month"); }}>{month + 1}月</button>
-                <div className="mini-weekdays">{weekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div>
-                <div className="mini-month-grid">{buildMonth(cursor.getFullYear(), month).map((day) => <button key={day.date.toISOString()} className={`${day.isCurrentMonth ? "" : "muted"} ${day.isToday ? "today" : ""}`} onClick={() => selectDate(day.date)}>{day.date.getDate()}</button>)}</div>
+                <div className="mini-weekdays">{weekdayOrder.map((dayIndex) => <span key={dayIndex}>{t(`weekday.${weekdayKeys()[dayIndex]}`)}</span>)}</div>
+                 <div className="mini-month-grid">{buildMonth(cursor.getFullYear(), month, holidayYears, calendar.weekStart, false).map((day) => <button key={day.date.toISOString()} className={`${day.isCurrentMonth ? "" : "muted"} ${day.isToday ? "today" : ""}`} onClick={() => selectDate(day.date)}>{day.date.getDate()}</button>)}</div>
               </section>
             ))}
           </div>
@@ -584,3 +664,11 @@ function CalendarApp() {
     </main>
   );
 }
+
+function useTranslator() {
+  const language = useSettingsStore((state) => state.language);
+  return useMemo(() => translator(language), [language]);
+}
+
+// Theme re-export for legacy references; keeps the module self-contained.
+export type { Theme };
