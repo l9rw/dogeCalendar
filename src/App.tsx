@@ -318,7 +318,6 @@ function CalendarApp() {
   const [cursor, setCursor] = useState(new Date(2026, 8, 1));
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
-  const [contextMenu, setContextMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsView, setSettingsView] = useState<"menu" | "update">("menu");
   const [infoPanel, setInfoPanel] = useState<"about" | null>(null);
@@ -354,7 +353,6 @@ function CalendarApp() {
       if (!active || !release || localStorage.getItem(IGNORED_UPDATE_KEY) === release.version) return;
       setUpdateRelease(release);
       setUpdateStatus("available");
-      setContextMenu(false);
       setInfoPanel(null);
       setShowSettings(true);
       setSettingsView("update");
@@ -365,7 +363,6 @@ function CalendarApp() {
   }, []);
 
   const checkUpdates = async () => {
-    setContextMenu(false);
     setShowToolbarMenu(false);
     setInfoPanel(null);
     setShowSettings(true);
@@ -389,14 +386,12 @@ function CalendarApp() {
   };
 
   const openSettings = () => {
-    setContextMenu(false);
     setInfoPanel(null);
     setShowSettings(true);
     setSettingsView("menu");
   };
 
   const showAbout = () => {
-    setContextMenu(false);
     setShowSettings(false);
     setShowToolbarMenu(false);
     setInfoPanel("about");
@@ -420,7 +415,7 @@ function CalendarApp() {
   useEffect(() => {
     if (!calendar.keyboardShortcut) return;
     const onKey = (event: KeyboardEvent) => {
-      if (showSettings || contextMenu || infoPanel) return;
+      if (showSettings || infoPanel) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
       switch (event.key) {
@@ -435,7 +430,7 @@ function CalendarApp() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendar.keyboardShortcut, showSettings, contextMenu, infoPanel]);
+  }, [calendar.keyboardShortcut, showSettings, infoPanel]);
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
     if (isMac) {
@@ -462,15 +457,9 @@ function CalendarApp() {
   useEffect(() => {
     const listeners = [
       listen("taskbar-calendar-click", () => {
-      setContextMenu(false);
-      setShowSettings(false);
-      setInfoPanel(null);
-      }),
-      listen("taskbar-calendar-context", () => {
-      setContextMenu(true);
-      setShowSettings(false);
-      setInfoPanel(null);
-      }),
+       setShowSettings(false);
+       setInfoPanel(null);
+       }),
       listen("open-settings", () => {
       openSettings();
       }),
@@ -511,16 +500,7 @@ function CalendarApp() {
 
   return (
     <main className="calendar-shell">
-      {contextMenu ? (
-        <div className="taskbar-context-menu" role="menu">
-          <button role="menuitem" onClick={() => setContextMenu(false)}>{t("menu.openCalendar")}</button>
-          <button role="menuitem" onClick={openSettings}>{t("menu.settings")}</button>
-          {isMac && <button role="menuitem" onClick={openSettings}>{t("menu.menubarSettings")}</button>}
-          <button role="menuitem" onClick={() => void checkUpdates()}>{t("menu.onlineUpdate")}</button>
-          <button role="menuitem" onClick={showAbout}>{t("menu.about")}</button>
-          <button role="menuitem" onClick={() => invoke("quit_app")}>{t("menu.quit")}</button>
-        </div>
-      ) : infoPanel ? (
+      {infoPanel ? (
         <section className="settings-panel info-panel" aria-label={t("settings.about")}>
           <div className="settings-header">
             <div><h2>{t("settings.about")}</h2></div>

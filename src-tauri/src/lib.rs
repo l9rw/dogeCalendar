@@ -1,5 +1,8 @@
 use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(windows)]
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
@@ -40,7 +43,7 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
+        ScreenToClient, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
         HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
@@ -185,6 +188,34 @@ fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
             show_calendar_at(app, x, y);
         }
     }
+}
+
+#[cfg(windows)]
+fn show_windows_context_menu(app: &tauri::AppHandle, x: i32, y: i32) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("main") else { return Ok(()) };
+    hide_main_panel(app);
+    let size = window.outer_size()?;
+    let (anchor_x, anchor_y) = work_area_anchor(x, y);
+    window.set_position(tauri::PhysicalPosition::new(
+        anchor_x - size.width as i32 - 8,
+        anchor_y - size.height as i32 - 4,
+    ))?;
+    let menu = Menu::with_items(app, &[
+        &MenuItem::with_id(app, "open-calendar", "打开日历", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
+        &MenuItem::with_id(app, "online-update", "在线更新", true, None::<&str>)?,
+        &MenuItem::with_id(app, "about", "关于", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
+    ])?;
+    let mut point = POINT { x, y };
+    unsafe { ScreenToClient(window.hwnd()?, &mut point)? };
+    let scale = window.scale_factor()?;
+    window.popup_menu_at(&menu, tauri::LogicalPosition::new(
+        point.x as f64 / scale,
+        point.y as f64 / scale,
+    ))
 }
 
 #[cfg(target_os = "macos")]
@@ -784,7 +815,29 @@ pub fn run() {
             setup_macos_menu_bar(app)?;
 
             #[cfg(windows)]
-            start_mouse_hook(app.handle().clone());
+            {
+                app.on_menu_event(|app, event| {
+                    if event.id().as_ref() == "quit" {
+                        app.exit(0);
+                        return;
+                    }
+                    let ui_event = match event.id().as_ref() {
+                        "open-calendar" => None,
+                        "settings" => Some("open-settings"),
+                        "online-update" => Some("open-update"),
+                        "about" => Some("open-about"),
+                        _ => return,
+                    };
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                    if let Some(ui_event) = ui_event {
+                        let _ = app.emit(ui_event, ());
+                    }
+                });
+                start_mouse_hook(app.handle().clone());
+            }
 
             let handle = app.handle().clone();
             app.listen("taskbar-calendar-click", move |event| {
@@ -813,6 +866,16 @@ pub fn run() {
                 let Some(y) = position.get("y").and_then(|value| value.as_i64()) else {
                     return;
                 };
+                #[cfg(windows)]
+                {
+                    let app = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        if let Err(error) = show_windows_context_menu(&app, x as i32, y as i32) {
+                            eprintln!("calendar: failed to show native context menu: {error}");
+                        }
+                    });
+                }
+                #[cfg(not(windows))]
                 show_calendar_at(&handle, x as i32, y as i32);
             });
 
