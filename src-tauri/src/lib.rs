@@ -376,94 +376,65 @@ fn menu_bar_style_set(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
 }
 
 #[cfg(target_os = "macos")]
-fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
+fn show_calendar_below_tray(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         #[cfg(debug_assertions)]
         eprintln!("calendar tray: main window missing");
         return;
     };
-    let Ok(size) = window.outer_size() else {
-        #[cfg(debug_assertions)]
-        eprintln!("calendar tray: failed to read main window size");
+    let Some(tray) = app.tray_by_id("calendar-menu-bar") else {
         return;
     };
-
-    // The tray reports physical coordinates in its screen's scale, not the window's scale.
-    let monitor = app.available_monitors().ok().and_then(|monitors| {
-        monitors.into_iter().find(|monitor| {
-            let scale = monitor.scale_factor();
-            let point = rect.position.to_logical::<f64>(scale);
-            let origin = monitor.position().to_logical::<f64>(scale);
-            let size = monitor.size().to_logical::<f64>(scale);
-            point.x >= origin.x
-                && point.x < origin.x + size.width
-                && point.y >= origin.y
-                && point.y < origin.y + size.height
-        })
-    });
-    let scale = monitor.as_ref().map_or_else(
-        || window.scale_factor().unwrap_or(1.0),
-        |m| m.scale_factor(),
-    );
-    let tray_position = rect.position.to_logical::<f64>(scale);
-    let tray_size = rect.size.to_logical::<f64>(scale);
-    let window_scale = window.scale_factor().unwrap_or(1.0);
-    let window_size = size.to_logical::<f64>(window_scale);
-    let mut x = tray_position.x + (tray_size.width - window_size.width) / 2.0;
-    let mut y = tray_position.y + tray_size.height + 6.0;
-
-    if let Some(monitor) = monitor {
-        // Tauri's macOS work area comes from NSScreen.visibleFrame.
-        const SAFE_MARGIN: f64 = 12.0;
-        let work_area = monitor.work_area();
-        let origin = work_area.position.to_logical::<f64>(scale);
-        let size = work_area.size.to_logical::<f64>(scale);
-        let left = origin.x + SAFE_MARGIN;
-        let top = origin.y + SAFE_MARGIN;
-        x = x.clamp(
-            left,
-            (origin.x + size.width - window_size.width - SAFE_MARGIN).max(left),
-        );
-        y = y.clamp(
-            top,
-            (origin.y + size.height - window_size.height - SAFE_MARGIN).max(top),
-        );
-    }
-
-    let position = tauri::LogicalPosition::new(x.round(), y.round());
+    // Use the status item's own screen and AppKit coordinates on every display.
+    let Ok(Some((tray_frame, visible_frame))) = tray.with_inner_tray_icon(|inner| {
+        let item = inner.ns_status_item()?;
+        let button = item.button(objc2::MainThreadMarker::new()?)?;
+        let status_window = button.window()?;
+        let screen = status_window.screen()?;
+        let frame = status_window.frame();
+        let visible = screen.visibleFrame();
+        Some((
+            (frame.origin.x, frame.origin.y, frame.size.width),
+            (visible.origin.x, visible.origin.y, visible.size.width, visible.size.height),
+        ))
+    }) else {
+        #[cfg(debug_assertions)]
+        eprintln!("calendar tray: failed to read status item screen");
+        return;
+    };
     MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
-    if let Err(error) = window.set_position(position) {
-        eprintln!("calendar tray: failed to position panel: {error}");
-    }
     // A key window in an inactive app still requires a click before its webview
     // receives input. Activate the accessory app when opening the calendar.
     match window.ns_window() {
         Ok(ns_window) => unsafe {
             use objc2::MainThreadMarker;
             use objc2_app_kit::NSApplication;
+            use objc2_foundation::NSPoint;
 
             let panel = &*(ns_window as *mut objc2_app_kit::NSWindow);
+            let size = panel.frame().size;
+            const SAFE_MARGIN: f64 = 12.0;
+            let left = visible_frame.0 + SAFE_MARGIN;
+            let bottom = visible_frame.1 + size.height + SAFE_MARGIN;
+            let x = (tray_frame.0 + (tray_frame.2 - size.width) / 2.0)
+                .clamp(left, (visible_frame.0 + visible_frame.2 - size.width - SAFE_MARGIN).max(left));
+            let y = (tray_frame.1 - 6.0)
+                .clamp(bottom, (visible_frame.1 + visible_frame.3 - SAFE_MARGIN).max(bottom));
+            panel.setFrameTopLeftPoint(NSPoint::new(x, y));
             panel.orderFrontRegardless();
             #[allow(deprecated)]
             NSApplication::sharedApplication(MainThreadMarker::new().expect("menu bar requires main thread"))
                 .activateIgnoringOtherApps(true);
             panel.makeKeyAndOrderFront(None);
+            #[cfg(debug_assertions)]
+            eprintln!("calendar tray: show at AppKit ({x}, {y}), screen={visible_frame:?}");
         },
         Err(error) => eprintln!("calendar tray: failed to get native panel: {error}"),
     }
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "calendar tray: show at ({}, {}), visible={:?}, focused={:?}, active_space={:?}",
-        position.x,
-        position.y,
-        window.is_visible(),
-        window.is_focused(),
-        window.ns_window().map(|ptr| unsafe { (*(ptr as *mut objc2_app_kit::NSWindow)).isOnActiveSpace() })
-    );
 }
 
 #[cfg(target_os = "macos")]
-fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
+fn toggle_calendar_below_tray(app: &tauri::AppHandle) {
     PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
     if let Some(window) = app.get_webview_window("main") {
         let on_active_space = window
@@ -482,7 +453,7 @@ fn toggle_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
         if visible && on_active_space {
             hide_main_panel(app);
         } else {
-            show_calendar_below_tray(app, rect);
+            show_calendar_below_tray(app);
         }
     }
 }
@@ -523,18 +494,13 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
                 "about" => Some("open-about"),
                 _ => return,
             };
-            if let Some(tray) = app.tray_by_id("calendar-menu-bar") {
-                if let Ok(Some(rect)) = tray.rect() {
-                    show_calendar_below_tray(app, rect);
-                }
-            }
+            show_calendar_below_tray(app);
             if let Some(ui_event) = ui_event {
                 let _ = app.emit(ui_event, ());
             }
         })
         .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
-                rect,
                 button,
                 button_state,
                 ..
@@ -547,7 +513,7 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
                     let app = tray.app_handle();
                     match button {
                         MouseButton::Left => {
-                            toggle_calendar_below_tray(app, rect);
+                            toggle_calendar_below_tray(app);
                             let _ = app.emit("taskbar-calendar-click", ());
                         }
                         MouseButton::Right => {
