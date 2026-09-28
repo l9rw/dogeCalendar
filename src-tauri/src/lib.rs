@@ -41,9 +41,10 @@ use std::sync::OnceLock;
 #[cfg(windows)]
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
+    Graphics::Gdi::ScreenToClient,
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        ScreenToClient, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
+        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
         HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
 };
@@ -210,7 +211,9 @@ fn show_windows_context_menu(app: &tauri::AppHandle, x: i32, y: i32) -> tauri::R
         &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
     ])?;
     let mut point = POINT { x, y };
-    unsafe { ScreenToClient(window.hwnd()?, &mut point)? };
+    if !unsafe { ScreenToClient(window.hwnd()?, &mut point) }.as_bool() {
+        return window.popup_menu(&menu);
+    }
     let scale = window.scale_factor()?;
     window.popup_menu_at(&menu, tauri::LogicalPosition::new(
         point.x as f64 / scale,
@@ -834,6 +837,8 @@ pub fn run() {
                     }
                     if let Some(ui_event) = ui_event {
                         let _ = app.emit(ui_event, ());
+                    } else {
+                        let _ = app.emit("taskbar-calendar-click", ());
                     }
                 });
                 start_mouse_hook(app.handle().clone());
@@ -869,7 +874,7 @@ pub fn run() {
                 #[cfg(windows)]
                 {
                     let app = handle.clone();
-                    let _ = handle.run_on_main_thread(move || {
+                    std::thread::spawn(move || {
                         if let Err(error) = show_windows_context_menu(&app, x as i32, y as i32) {
                             eprintln!("calendar: failed to show native context menu: {error}");
                         }
