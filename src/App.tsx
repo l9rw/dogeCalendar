@@ -212,6 +212,7 @@ function DetailPanel() {
       <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel: "detail" })} aria-label={t("settings.close")}>×</button>
       <div className="detail-topline">
         <img className="detail-mascot" src="/icon.png" alt="Doge" />
+        <span className="detail-title">dogeCalendar</span>
         {selected.toDateString() === new Date().toDateString() && <span className="today-badge">{t("today")}</span>}
       </div>
       <div className="detail-date">
@@ -603,6 +604,9 @@ function CalendarApp() {
                     <span className="toolbar-menu-check" />
                     <span>{t("menu.menubarSettings")}</span>
                   </button>}
+                  <button role="menuitem" className="toolbar-menu-item" onClick={() => { openSettings(); setShowToolbarMenu(false); }}>
+                    <span className="toolbar-menu-check" /><span>{t("menu.settings")}</span>
+                  </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => void checkUpdates()}>
                     <span className="toolbar-menu-check" /><span>{t("menu.onlineUpdate")}</span>
                   </button>
