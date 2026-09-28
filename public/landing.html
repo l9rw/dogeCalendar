@@ -197,7 +197,6 @@
       @media (prefers-reduced-motion: reduce) {
         html { scroll-behavior: auto; }
         *, *::before, *::after { transition-duration: .01ms !important; }
-        .page-turn-overlay { animation: none !important; }
       }
     </style>
   </head>
@@ -376,23 +375,21 @@
       toggle.addEventListener("click", () => {
         if (document.querySelector(".page-turn-overlay")) return;
         const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          const oldStyle = getComputedStyle(document.documentElement);
-          const overlay = document.createElement("div");
-          overlay.className = "page-turn-overlay";
-          overlay.setAttribute("aria-hidden", "true");
-          for (const property of oldStyle) {
-            if (property.startsWith("--")) overlay.style.setProperty(property, oldStyle.getPropertyValue(property));
-          }
-          overlay.style.fontFamily = oldStyle.fontFamily;
-          const page = document.querySelector(".page").cloneNode(true);
-          page.style.transform = `translateY(-${window.scrollY}px)`;
-          overlay.append(page);
-          overlay.style.animationPlayState = "paused";
-          document.body.append(overlay);
-          overlay.addEventListener("animationend", () => overlay.remove(), { once: true });
-          requestAnimationFrame(() => { overlay.style.animationPlayState = "running"; });
+        const oldStyle = getComputedStyle(document.documentElement);
+        const overlay = document.createElement("div");
+        overlay.className = "page-turn-overlay";
+        overlay.setAttribute("aria-hidden", "true");
+        for (const property of oldStyle) {
+          if (property.startsWith("--")) overlay.style.setProperty(property, oldStyle.getPropertyValue(property));
         }
+        overlay.style.fontFamily = oldStyle.fontFamily;
+        const page = document.querySelector(".page").cloneNode(true);
+        page.style.transform = `translateY(-${window.scrollY}px)`;
+        overlay.append(page);
+        overlay.style.animationPlayState = "paused";
+        document.body.append(overlay);
+        overlay.addEventListener("animationend", () => overlay.remove(), { once: true });
+        requestAnimationFrame(() => { overlay.style.animationPlayState = "running"; });
         applyTheme(nextTheme);
         try { localStorage.setItem(themeKey, nextTheme); } catch { /* Private browsing may disable storage. */ }
       });
