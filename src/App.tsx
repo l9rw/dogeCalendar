@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fetchHolidayYear, getCalendarMeta, dateKey, type HolidayYear } from "./services/calendarData";
-import { fetchHuangli, type Huangli } from "./services/huangli";
+import type { Huangli } from "./services/huangli";
 import { useInfoStore } from "./stores/infoStore";
 import {
   useSettingsStore,
@@ -69,7 +69,8 @@ function useAppearanceEffect() {
     root.style.setProperty("--shell-border", `color-mix(in srgb, ${accent} 32%, var(--line))`);
     root.style.setProperty("--surface-3", `color-mix(in srgb, ${accent} 9%, var(--surface-2))`);
     root.style.setProperty("--shell-bg", background);
-  }, [accent, background]);
+    root.style.setProperty("--glass-opacity", `${appearance.glassOpacity}%`);
+  }, [accent, background, appearance.glassOpacity]);
   useEffect(() => {
     document.documentElement.dataset.lang = resolveLanguage(language);
   }, [language]);
@@ -181,31 +182,30 @@ function DetailPanel() {
     const date = new URLSearchParams(window.location.search).get("date");
     return parseDetailDate(date);
   });
-  const [huangli, setHuangli] = useState<Huangli | null>(null);
-  const [huangliDate, setHuangliDate] = useState<string | null>(null);
-  const [huangliLoading, setHuangliLoading] = useState(false);
-  const selectedKey = dateKey(selected);
+  const [showHuangliDetails, setShowHuangliDetails] = useState(false);
+  const [calculateHuangli, setCalculateHuangli] = useState<((date: Date) => Huangli) | null>(null);
+  const huangli = useMemo(() => calculateHuangli?.(selected) ?? null, [calculateHuangli, selected]);
+  const hasHuangliDetails = !!(huangli?.zhushen || huangli?.taishen || huangli?.pengsheng);
   const selectedMeta = getCalendarMeta(selected);
+
+  useEffect(() => {
+    let active = true;
+    void import("./services/huangli").then(({ getHuangli }) => {
+      if (active) setCalculateHuangli(() => getHuangli);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
     const listener = listen<string>("detail-date-changed", (event) => {
-      if (!disposed) setSelected(parseDetailDate(event.payload));
+      if (!disposed) {
+        setSelected(parseDetailDate(event.payload));
+        setShowHuangliDetails(false);
+      }
     });
     return () => { disposed = true; listener.then((dispose) => dispose()); };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setHuangliLoading(true);
-    fetchHuangli(selectedKey)
-      .then((data) => { if (!cancelled) { setHuangli(data); setHuangliDate(selectedKey); } })
-      .catch(() => { if (!cancelled) { setHuangli(null); setHuangliDate(selectedKey); } })
-      .finally(() => { if (!cancelled) setHuangliLoading(false); });
-    return () => { cancelled = true; };
-  }, [selectedKey]);
-
-  const activeHuangli = huangliDate === selectedKey ? huangli : null;
 
   return (
     <main className="aux-shell detail-panel" aria-label={t("dateDetail")}>
@@ -226,22 +226,35 @@ function DetailPanel() {
       <WeatherCard />
       <div className="detail-divider" />
       <div className="detail-almanac">
-        <div className="detail-section"><span className="section-label">宜</span><p>{activeHuangli?.yi?.length ? activeHuangli.yi.join(" · ") : huangliLoading ? "加载中…" : "暂无宜事"}</p></div>
-        <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p>{activeHuangli?.ji?.length ? activeHuangli.ji.join(" · ") : huangliLoading ? "加载中…" : "暂无忌事"}</p></div>
+        <div className="detail-section"><span className="section-label">宜</span><p>{huangli ? huangli.yi.join(" · ") : "计算中…"}</p></div>
+        <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p>{huangli ? huangli.ji.join(" · ") : "计算中…"}</p></div>
       </div>
       <div className="huangli-meta">
-        {activeHuangli?.ganzhi && <span><i>干支</i>{activeHuangli.ganzhi}</span>}
-        {activeHuangli?.shengxiao && <span><i>生肖</i>{activeHuangli.shengxiao}</span>}
-        {activeHuangli?.xingzuo && <span><i>星座</i>{activeHuangli.xingzuo}</span>}
-        {activeHuangli?.jieqi && <span><i>节气</i>{activeHuangli.jieqi}</span>}
+        {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
+        {huangli?.shengxiao && <span className="huangli-zodiac"><i>生肖</i>{huangli.shengxiao}{hasHuangliDetails && (
+          <button
+            className="huangli-details-toggle"
+            type="button"
+            aria-label={showHuangliDetails ? "折叠神胎详情" : "展开神胎详情"}
+            title={showHuangliDetails ? "折叠神胎详情" : "展开神胎详情"}
+            aria-expanded={showHuangliDetails}
+            aria-controls="huangli-details"
+            onClick={() => setShowHuangliDetails((value) => !value)}
+          >
+            <svg className={showHuangliDetails ? "expanded" : ""} viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}</span>}
+        {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
+        {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
         {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
       </div>
-      {(activeHuangli?.zhushen || activeHuangli?.taishen || activeHuangli?.pengsheng || (!activeHuangli && !huangliLoading)) && (
-        <div className="side-holiday-card">
-          {activeHuangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {activeHuangli.zhushen}</p></div>}
-          {activeHuangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{activeHuangli.taishen}</p></div>}
-          {activeHuangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{activeHuangli.pengsheng}</p></div>}
-          {!activeHuangli && !huangliLoading && <div className="holiday-lines"><p>黄历接口暂时不可用</p></div>}
+      {hasHuangliDetails && (
+        <div className="side-holiday-card" id="huangli-details" hidden={!showHuangliDetails}>
+          {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
+          {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
+          {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
         </div>
       )}
     </main>
@@ -315,19 +328,22 @@ function CalendarApp() {
   const [updateError, setUpdateError] = useState("");
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
   const [holidayYears, setHolidayYears] = useState<Record<number, HolidayYear>>({});
+  const wheelGesture = useRef({ lastEvent: -Infinity, delta: 0, handled: false });
   useAppearanceEffect();
   const days = useMemo(
     () => buildMonth(cursor.getFullYear(), cursor.getMonth(), holidayYears, calendar.weekStart, calendar.showWeekNumbers),
     [cursor, holidayYears, calendar.weekStart, calendar.showWeekNumbers],
   );
 
+  const cursorYear = cursor.getFullYear();
   useEffect(() => {
+    if (holidayYears[cursorYear]) return;
     let active = true;
-    void fetchHolidayYear(cursor.getFullYear()).then((data) => {
-      if (active && data) setHolidayYears((current) => ({ ...current, [cursor.getFullYear()]: data }));
+    void fetchHolidayYear(cursorYear).then((data) => {
+      if (active && data) setHolidayYears((current) => ({ ...current, [cursorYear]: data }));
     });
     return () => { active = false; };
-  }, [cursor]);
+  }, [cursorYear, holidayYears]);
 
   useEffect(() => {
     void getVersion().then(setAppVersion).catch(console.error);
@@ -396,7 +412,8 @@ function CalendarApp() {
 
   const selectDate = (date: Date) => {
     setSelected(date);
-    setCursor(new Date(date.getFullYear(), date.getMonth(), 1));
+    setCursor((current) => current.getFullYear() === date.getFullYear() && current.getMonth() === date.getMonth()
+      ? current : new Date(date.getFullYear(), date.getMonth(), 1));
     void invoke("open_aux_panel", { panel: "detail", date: dateKey(date) });
   };
 
@@ -421,6 +438,22 @@ function CalendarApp() {
   }, [calendar.keyboardShortcut, showSettings, contextMenu, infoPanel]);
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (isMac) {
+      if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      const gesture = wheelGesture.current;
+      if (event.timeStamp - gesture.lastEvent > 180) {
+        gesture.delta = 0;
+        gesture.handled = false;
+      }
+      gesture.lastEvent = event.timeStamp;
+      if (gesture.handled) return;
+      gesture.delta += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
+      if (Math.abs(gesture.delta) >= 40) {
+        gesture.handled = true;
+        moveMonth(gesture.delta < 0 ? -1 : 1);
+      }
+      return;
+    }
     if (Math.abs(event.deltaY) >= 8) moveMonth(event.deltaY < 0 ? -1 : 1);
   };
 
@@ -441,6 +474,15 @@ function CalendarApp() {
       listen("open-settings", () => {
       openSettings();
       }),
+      listen("open-menubar-settings", () => {
+      openSettings();
+      }),
+      listen("open-update", () => {
+      void checkUpdates();
+      }),
+      listen("open-about", () => {
+      showAbout();
+      }),
     ];
     return () => {
       void Promise.allSettled(listeners).then((results) => {
@@ -448,31 +490,6 @@ function CalendarApp() {
           if (result.status === "fulfilled") result.value();
         });
       });
-    };
-  }, []);
-
-  useEffect(() => {
-    const loadClocks = useInfoStore.getState().loadClocks;
-    let timer: number | undefined;
-    const tick = () => loadClocks();
-    const start = () => {
-      if (timer === undefined) {
-        tick();
-        timer = window.setInterval(tick, 15000);
-      }
-    };
-    const stop = () => {
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-        timer = undefined;
-      }
-    };
-    const onVisibility = () => (document.hidden ? stop() : start());
-    start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -506,7 +523,7 @@ function CalendarApp() {
       ) : infoPanel ? (
         <section className="settings-panel info-panel" aria-label={t("settings.about")}>
           <div className="settings-header">
-            <div><p className="eyebrow">ABOUT dogeCalendar</p><h2>{t("settings.about")}</h2></div>
+            <div><h2>{t("settings.about")}</h2></div>
             <button className="settings-close" aria-label={t("settings.close")} onClick={() => setInfoPanel(null)}>×</button>
           </div>
           <div className="info-app"><img src="/icon.png" alt="" /><div><strong>dogeCalendar</strong><span>{t("update.currentVersion")} {appVersion || "…"}</span></div></div>

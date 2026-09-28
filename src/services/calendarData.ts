@@ -47,6 +47,7 @@ export type HolidayYear = Record<string, HolidayOverride>;
 export type HolidayYears = Record<number, HolidayYear>;
 
 const remoteHolidayRequests = new Map<number, Promise<HolidayYear | null>>();
+let lunarFormatter: Intl.DateTimeFormat | undefined;
 
 export async function fetchHolidayYear(year: number): Promise<HolidayYear | null> {
   if (holidayOverrides[year]) return holidayOverrides[year];
@@ -72,11 +73,11 @@ export async function fetchHolidayYear(year: number): Promise<HolidayYear | null
 
 function lunarParts(date: Date) {
   try {
-    const formatter = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
+    lunarFormatter ??= new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
       month: "long",
       day: "numeric",
     });
-    const parts = formatter.formatToParts(date);
+    const parts = lunarFormatter.formatToParts(date);
     const dayText = parts.find((part) => part.type === "day")?.value ?? "";
     return {
       month: parts.find((part) => part.type === "month")?.value ?? "",

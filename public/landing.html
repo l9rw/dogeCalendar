@@ -94,19 +94,15 @@
 
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; }
-      .page-turn-overlay { position: fixed; z-index: 9999; inset: 0; overflow: hidden; pointer-events: none; background: var(--bg); color: var(--text); transform-origin: top right; filter: drop-shadow(16px 12px 16px #0005); animation: page-turn 1s cubic-bezier(.62, .02, .2, 1) forwards; }
-      .page-turn-overlay::after { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 40%, #ffffff22 65%, #0000001c 100%); pointer-events: none; }
-      @keyframes page-turn {
-        0% { clip-path: polygon(0 0, 100% 0, 100% 0, 100% 100%, 0 100%); transform: perspective(1600px) rotateY(0) rotate(0); }
-        50% { clip-path: polygon(0 0, 49% 0, 100% 65%, 100% 100%, 0 100%); transform: perspective(1600px) rotateY(-7deg) rotate(-1deg); }
-        100% { clip-path: polygon(0 100%, 0 100%, 0 100%, 0 100%, 0 100%); transform: perspective(1600px) rotateY(-13deg) rotate(-2deg); }
-      }
+      .theme-transition-layer { position: fixed; z-index: 9999; inset: 0; overflow: hidden; pointer-events: none; background: var(--bg); color: var(--text); }
+      .theme-transition-layer header { position: relative; top: var(--scroll-y); }
+      .theme-reveal-overlay { z-index: 10000; clip-path: circle(0px at var(--reveal-x) var(--reveal-y)); }
       body { margin: 0; min-width: 320px; background: var(--bg); }
       a { color: inherit; text-decoration: none; }
       a:focus-visible, button:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
       .page { width: min(1180px, calc(100% - 80px)); margin: 0 auto; }
 
-      header { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 104px; border-bottom: 1px solid var(--line); }
+      header { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 104px; border-bottom: 1px solid var(--line); background: var(--bg); }
       .brand { display: inline-flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 750; letter-spacing: -.04em; }
       .brand img { width: 40px; height: 40px; border-radius: 11px; }
       .header-actions { display: flex; align-items: center; gap: 22px; }
@@ -144,9 +140,70 @@
       .section-kicker { color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .14em; }
       .section-title { margin: 12px 0 12px; font-size: clamp(28px, 3.2vw, 40px); line-height: 1.25; letter-spacing: -.05em; }
       .section-intro { max-width: 600px; margin: 0 0 31px; color: var(--muted); font-size: 14px; line-height: 1.8; }
-      .platform-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .platform-tabs { display: inline-flex; gap: 4px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--tag); }
+      .platform-tab { padding: 10px 22px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+      .platform-tab[aria-selected="true"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px #0001; }
+      .platform-card[hidden], .scene-calendar[hidden], .scene-days[hidden], .scene-detail[hidden] { display: none !important; }
       .platform-card { display: flex; flex-direction: column; padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); }
-      .platform-shot { display: block; width: 100%; height: auto; margin: 20px 0 0; border: 1px solid var(--line); border-radius: 12px; }
+      .platform-scene { position: relative; width: 100%; aspect-ratio: 1200 / 740; margin: 20px 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; container-type: inline-size; background: var(--scene-desktop) center / 100% 100% no-repeat; }
+      .platform-scene.windows { --scene-desktop: url("./windows-desktop-light.png"); --scene-cover-top: 24.3%; --scene-cover-left: 63.55%; --scene-cover-y: 76%; }
+      .platform-scene.mac { --scene-desktop: url("./macos-desktop-light.png"); --scene-cover-top: 6.45%; --scene-cover-left: 61.15%; --scene-cover-y: 20%; }
+      [data-theme="dark"] .platform-scene.windows { --scene-desktop: url("./windows-desktop-dark.png"); }
+      [data-theme="dark"] .platform-scene.mac { --scene-desktop: url("./macos-desktop-dark.png"); }
+      .platform-scene::before { content: ""; position: absolute; z-index: 1; top: var(--scene-cover-top); left: var(--scene-cover-left); width: 35%; height: 67.9%; background: var(--scene-desktop) 40% var(--scene-cover-y) / 285.714% 147.275% no-repeat; pointer-events: none; }
+      .scene-trigger { position: absolute; z-index: 5; padding: 0; border: 0; background: transparent; cursor: pointer; }
+      .scene-trigger:hover, .scene-trigger:focus-visible { outline: 2px solid #496cff; outline-offset: -2px; background: #496cff24; }
+      .mac .scene-trigger { top: 0; right: 16.5%; width: 2.5%; height: 5%; border-radius: .5cqw; }
+      .windows .scene-trigger { right: 0; bottom: 0; width: 8%; height: 6.5%; }
+      .scene-calendar { position: absolute; z-index: 2; width: 35%; height: 67.9%; overflow: hidden; filter: drop-shadow(0 2cqw 2.5cqw #16203b55); }
+      .windows .scene-calendar { top: 24.3%; left: 63.55%; }
+      .mac .scene-calendar { top: 6.45%; left: 61.15%; }
+      .scene-calendar img { position: absolute; width: 100cqw; max-width: none; height: auto; }
+      .windows .scene-calendar img { top: -15cqw; left: -63.55cqw; }
+      .mac .scene-calendar img { top: -4cqw; left: -61.15cqw; }
+      .scene-days { position: absolute; z-index: 3; display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); width: 32.4%; height: 49.5%; }
+      .windows .scene-days { top: 41.8%; left: 64.8%; }
+      .mac .scene-days { top: 24%; left: 62.4%; }
+      .scene-days button { min-width: 0; padding: 0; border: 1px solid transparent; border-radius: .6cqw; background: transparent; cursor: pointer; }
+      .scene-days button:hover, .scene-days button:focus-visible, .scene-days button[aria-pressed="true"] { border-color: #496cff; background: #496cff33; outline: none; }
+      .scene-dismiss { position: absolute; z-index: 0; inset: 5% 0 7%; width: 100%; border: 0; background: transparent; cursor: default; }
+      .scene-detail { position: absolute; z-index: 4; top: 24.3%; left: 33.55%; width: 29%; height: 67.9%; padding: 1.35cqw 1.45cqw; overflow: hidden; border: 1px solid var(--scene-border); border-radius: 1.3cqw; background: var(--scene-surface); box-shadow: 0 2cqw 3cqw #18233b48; color: var(--scene-text); font-size: 1.15cqw; line-height: 1.35; text-align: left; }
+      .platform-scene.mac .scene-detail { top: 6.45%; left: 31.15%; }
+      .scene-detail-top { display: flex; align-items: center; gap: .5em; font-size: .9em; font-weight: 650; }
+      .scene-detail-top img { width: 1.8em; height: 1.8em; border-radius: .4em; }
+      .scene-detail-close { margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--scene-dim); font: inherit; font-size: 1.6em; font-weight: 400; line-height: 1; cursor: pointer; }
+      .scene-detail-date { display: flex; align-items: end; gap: .85em; margin-top: .85em; }
+      .scene-detail-day { color: #496cff; font-size: 4em; font-weight: 400; line-height: .95; letter-spacing: -.06em; }
+      .scene-detail-month { display: grid; gap: .12em; padding-bottom: .25em; }
+      .scene-detail-month strong { font-size: 1.1em; font-weight: 650; }
+      .scene-detail-month small { color: var(--scene-dim); font-size: .86em; }
+      .scene-detail-lunar { display: flex; gap: .6em; margin: .65em 0 1.1em; color: var(--scene-soft); font-size: .88em; }
+      .scene-detail-lunar span:last-child { color: var(--scene-dim); }
+      .scene-weather { padding: .75em .85em; border: 1px solid var(--scene-line); border-radius: .9em; background: linear-gradient(160deg, var(--scene-tint), var(--scene-surface)); }
+      .scene-weather-main { display: flex; align-items: center; gap: .55em; }
+      .scene-weather-icon { font-size: 1.55em; line-height: 1; }
+      .scene-weather-temp { display: grid; line-height: 1.2; }
+      .scene-weather-temp strong { font-size: 1.45em; font-weight: 600; }
+      .scene-weather-temp small { color: var(--scene-dim); font-size: .8em; }
+      .scene-weather-place { margin-top: .65em; color: #496cff; font-size: .78em; font-weight: 600; }
+      .scene-detail-rule { height: 1px; margin: 1.1em 0; background: var(--scene-line); }
+      .scene-almanac { display: grid; gap: .75em; }
+      .scene-almanac-row { display: grid; grid-template-columns: 1.8em 1fr; align-items: start; gap: .5em; font-size: .85em; line-height: 1.5; }
+      .scene-almanac-row b { color: #496cff; font-weight: 700; }
+      .scene-almanac-row:last-child b { color: var(--scene-dim); }
+      .scene-almanac-row span { color: var(--scene-soft); }
+      .scene-detail-meta { display: grid; grid-template-columns: 1fr 1fr; gap: .55em .8em; margin-top: 1.2em; padding-top: 1em; border-top: 1px solid var(--scene-line); color: var(--scene-soft); font-size: .76em; }
+      .scene-detail-meta i { margin-right: .45em; color: var(--scene-dim); font-style: normal; font-weight: 600; }
+      .platform-scene { --scene-surface: #fff; --scene-text: #171717; --scene-soft: #313131; --scene-dim: #858585; --scene-line: #f0f0f0; --scene-border: #d9e8ff; --scene-tint: #f2f5ff; }
+      [data-theme="dark"] .platform-scene { --scene-surface: #1a1e25; --scene-text: #e7e9ee; --scene-soft: #b9bdc6; --scene-dim: #8b9099; --scene-line: #2a2f38; --scene-border: #353b45; --scene-tint: #2a2f38; }
+      .scene-view { align-self: flex-end; margin-top: 10px; padding: 5px 0; border: 0; background: transparent; color: var(--status-link); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+      .scene-view:hover { color: var(--link-hover); text-decoration: underline; text-underline-offset: 3px; }
+      .scene-dialog { width: min(1200px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 32px); padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--text); box-shadow: 0 24px 80px #0006; }
+      .scene-dialog::backdrop { background: #10141dc4; }
+      .scene-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 12px; font-size: 16px; }
+      .scene-dialog-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--tag); color: var(--text); font-size: 22px; cursor: pointer; }
+      .scene-dialog-stage { max-height: calc(100vh - 112px); overflow: auto; }
+      .scene-dialog .platform-scene { min-width: 760px; margin: 0; }
       .platform-name { display: inline-flex; align-items: center; gap: 10px; margin: 0; font-size: 22px; letter-spacing: -.04em; }
       .platform-name svg { width: 23px; height: 23px; }
       .platform-card p { margin: 12px 0 20px; color: var(--muted); font-size: 14px; line-height: 1.85; }
@@ -186,8 +243,8 @@
         .visual { margin: 18px 0 0; }
         .visual img { width: min(100%, 390px); }
         .platforms { padding: 39px 0 42px; }
-        .platform-grid { grid-template-columns: 1fr; }
         .platform-card { padding: 23px; }
+        .platform-scene { margin-top: 15px; }
         .features { grid-template-columns: 1fr; gap: 0; padding: 12px 0 38px; }
         .feature, .feature:first-child { padding: 19px 0; border-left: 0; border-bottom: 1px solid var(--line); }
         .feature:last-child { border-bottom: 0; }
@@ -242,20 +299,51 @@
           <span class="section-kicker">WINDOWS + MACOS</span>
           <h2 id="platforms-title" class="section-title" data-i18n="platformsTitle">两种桌面，同样顺手。</h2>
           <p class="section-intro" data-i18n="platformsIntro">针对不同系统的使用习惯设计入口；月历、农历、天气与世界时间，在两个平台都能使用。</p>
+          <div class="platform-tabs" role="tablist" aria-label="平台预览" data-i18n-aria="platformTabs"><button class="platform-tab" id="tab-windows" type="button" role="tab" aria-controls="panel-windows" aria-selected="true">Windows</button><button class="platform-tab" id="tab-mac" type="button" role="tab" aria-controls="panel-mac" aria-selected="false">macOS</button></div>
           <div class="platform-grid">
-            <article class="platform-card">
-              <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 4.2 10.5 3v8H2V4.2Zm10-1.4L22 1.4V11H12V2.8ZM2 12.5h8.5v8L2 19.3v-6.8Zm10 0h10v9.9L12 21v-8.5Z" /></svg>Windows</h3>
-              <img id="windows-desktop" class="platform-shot" src="./windows-desktop-light.png" width="1200" height="740" alt="Windows 11 任务栏旁打开的 dogeCalendar 主面板合成展示" data-i18n-alt="windowsShotAlt" loading="lazy" />
+            <article class="platform-card" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows">
+              <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 4.2 10.5 3v8H2V4.2Zm10-1.4L22 1.4V11H12V2.8ZM2 12.5h8.5v8L2 19.3v-6.8Zm10 0h10v9.9L12 21v-8.5Z" /></svg>Windows 11</h3>
+              <div class="platform-scene windows" aria-label="Windows 11 桌面交互预览" data-i18n-aria="windowsShotAlt">
+                <button class="scene-dismiss" type="button" aria-label="收起日历" data-i18n-aria="dismissCalendar"></button>
+                <button class="scene-trigger" type="button" aria-expanded="false" aria-label="点击任务栏时间打开日历" data-i18n-aria="windowsTrigger"></button>
+                <div class="scene-calendar" hidden><img class="platform-shot" data-scene-image="windows" src="./windows-desktop-light.png" width="1200" height="740" alt="dogeCalendar 月历" loading="lazy" /></div>
+                <div class="scene-days" hidden></div>
+                <div class="scene-detail" hidden>
+                  <div class="scene-detail-top"><img src="./icon.png" alt="" /><span>dogeCalendar</span><button class="scene-detail-close" type="button" aria-label="关闭日期详情" data-i18n-aria="closeDetail">×</button></div>
+                  <div class="scene-detail-date"><span class="scene-detail-day">28</span><span class="scene-detail-month"><strong>2026年9月</strong><small>星期一</small></span></div>
+                  <div class="scene-detail-lunar"><span>八月十八</span><span>农历</span></div>
+                  <div class="scene-weather"><div class="scene-weather-main"><span class="scene-weather-icon">⛅</span><span class="scene-weather-temp"><strong>24°</strong><small>多云</small></span></div><div class="scene-weather-place">上海 · 天气</div></div>
+                  <div class="scene-detail-rule"></div>
+                  <div class="scene-almanac"><div class="scene-almanac-row"><b>宜</b><span>出行 · 会友 · 祈福</span></div><div class="scene-almanac-row"><b>忌</b><span>动土 · 开仓</span></div></div>
+                  <div class="scene-detail-meta"><span><i>干支</i>丙午年</span><span><i>生肖</i>马</span><span><i>星座</i>天秤座</span><span><i>节气</i>秋分后</span></div>
+                </div>
+              </div>
+              <button class="scene-view" type="button" data-i18n="viewLarge">查看大图 ↗</button>
               <p data-i18n="windowsDesc">从任务栏时钟打开日历面板，不打断当前工作；快速查看月历、农历与节假日，右键还能进入设置。</p>
               <div class="platform-tags"><span data-i18n="windowsTag1">任务栏时钟入口</span><span data-i18n="windowsTag2">节假日 / 调休标记</span><span data-i18n="windowsTag3">日期详情</span></div>
-              <span class="platform-status" data-i18n="windowsStatus">Windows 11 桌面合成展示；应用面板来自真实浏览器预览截图。</span>
+              <span class="platform-status" data-i18n="windowsStatus">桌面与应用界面合成示意；天气、黄历为示例数据。</span>
             </article>
-            <article class="platform-card">
-              <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 12.9c0-2.1 1.7-3.1 1.8-3.2-1-1.5-2.4-1.7-2.9-1.8-1.2-.1-2.3.7-2.9.7-.6 0-1.5-.7-2.5-.7-1.3 0-2.6.8-3.3 1.9-1.4 2.4-.4 5.8 1 7.8.7 1 1.4 2.1 2.4 2.1.9 0 1.3-.6 2.5-.6s1.5.6 2.5.6 1.7-1 2.4-2c.8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-2.5Zm-2.1-6.1c.6-.7 1-1.6.9-2.6-.8 0-1.8.5-2.4 1.2-.5.6-1 1.6-.9 2.5.9.1 1.8-.4 2.4-1.1Z" /></svg>macOS</h3>
-              <img id="macos-desktop" class="platform-shot" src="./macos-desktop-light.png" width="1200" height="740" alt="macOS 27 菜单栏下方打开的 dogeCalendar 主面板合成展示，非 macOS 实机截图" data-i18n-alt="macShotAlt" loading="lazy" />
+            <article class="platform-card" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" hidden>
+              <h3 class="platform-name"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 12.9c0-2.1 1.7-3.1 1.8-3.2-1-1.5-2.4-1.7-2.9-1.8-1.2-.1-2.3.7-2.9.7-.6 0-1.5-.7-2.5-.7-1.3 0-2.6.8-3.3 1.9-1.4 2.4-.4 5.8 1 7.8.7 1 1.4 2.1 2.4 2.1.9 0 1.3-.6 2.5-.6s1.5.6 2.5.6 1.7-1 2.4-2c.8-1.1 1.1-2.2 1.1-2.3-.1 0-2.1-.8-2.1-2.5Zm-2.1-6.1c.6-.7 1-1.6.9-2.6-.8 0-1.8.5-2.4 1.2-.5.6-1 1.6-.9 2.5.9.1 1.8-.4 2.4-1.1Z" /></svg>macOS 27</h3>
+              <div class="platform-scene mac" aria-label="macOS 桌面交互预览" data-i18n-aria="macShotAlt">
+                <button class="scene-dismiss" type="button" aria-label="收起日历" data-i18n-aria="dismissCalendar"></button>
+                <button class="scene-trigger" type="button" aria-expanded="false" aria-label="点击菜单栏图标打开日历" data-i18n-aria="macTrigger"></button>
+                <div class="scene-calendar" hidden><img class="platform-shot" data-scene-image="macos" src="./macos-desktop-light.png" width="1200" height="740" alt="dogeCalendar 月历" loading="lazy" /></div>
+                <div class="scene-days" hidden></div>
+                <div class="scene-detail" hidden>
+                  <div class="scene-detail-top"><img src="./icon.png" alt="" /><span>dogeCalendar</span><button class="scene-detail-close" type="button" aria-label="关闭日期详情" data-i18n-aria="closeDetail">×</button></div>
+                  <div class="scene-detail-date"><span class="scene-detail-day">28</span><span class="scene-detail-month"><strong>2026年9月</strong><small>星期一</small></span></div>
+                  <div class="scene-detail-lunar"><span>八月十八</span><span>农历</span></div>
+                  <div class="scene-weather"><div class="scene-weather-main"><span class="scene-weather-icon">⛅</span><span class="scene-weather-temp"><strong>24°</strong><small>多云</small></span></div><div class="scene-weather-place">上海 · 天气</div></div>
+                  <div class="scene-detail-rule"></div>
+                  <div class="scene-almanac"><div class="scene-almanac-row"><b>宜</b><span>出行 · 会友 · 祈福</span></div><div class="scene-almanac-row"><b>忌</b><span>动土 · 开仓</span></div></div>
+                  <div class="scene-detail-meta"><span><i>干支</i>丙午年</span><span><i>生肖</i>马</span><span><i>星座</i>天秤座</span><span><i>节气</i>秋分后</span></div>
+                </div>
+              </div>
+              <button class="scene-view" type="button" data-i18n="viewLarge">查看大图 ↗</button>
               <p data-i18n="macDesc">从菜单栏图标展开日历面板，点按空白处即可收起；可调整菜单栏图标样式，保持桌面整洁。</p>
               <div class="platform-tags"><span data-i18n="macTag1">菜单栏图标入口</span><span data-i18n="macTag2">菜单栏样式设置</span><span data-i18n="macTag3">点按外部收起</span></div>
-              <span class="platform-status" data-i18n="macStatus">macOS 27 桌面合成展示，非 macOS 实机截图；应用面板来自浏览器预览。</span>
+              <span class="platform-status" data-i18n="macStatus">桌面与应用界面合成示意；天气、黄历为示例数据。</span>
             </article>
           </div>
         </section>
@@ -269,6 +357,10 @@
 
       <footer><span data-i18n="footerTagline">© dogeCalendar · 简单一点，过好每一天。</span><span><span data-i18n="footerOpen">开源项目 · </span><a href="https://github.com/l9rw/dogeCalendar" target="_blank" rel="noopener noreferrer">GitHub ↗</a></span></footer>
     </div>
+    <dialog id="scene-dialog" class="scene-dialog" aria-labelledby="scene-dialog-title">
+      <div class="scene-dialog-head"><strong id="scene-dialog-title"></strong><button class="scene-dialog-close" id="scene-dialog-close" type="button" aria-label="关闭大图" data-i18n-aria="closePreview">×</button></div>
+      <div class="scene-dialog-stage"></div>
+    </dialog>
     <script>
       const themeKey = "dogeCalendar-landing-theme";
       const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
@@ -286,15 +378,16 @@
           download: "下载最新版本", source: "查看源代码", releaseNote: "前往 GitHub Releases，选择适合你系统的安装包。",
           screenshotAlt: "Windows 本机浏览器预览中实际渲染的 dogeCalendar 月历界面，显示日期、农历与休班标记",
           screenshotCaption: "Windows 应用界面 · 本机浏览器预览截图",
-          windowsShotAlt: "Windows 11 任务栏旁打开的 dogeCalendar 主面板合成展示",
-          macShotAlt: "macOS 27 菜单栏下方打开的 dogeCalendar 主面板合成展示，非 macOS 实机截图",
-          platformsTitle: "两种桌面，同样顺手。", platformsIntro: "针对不同系统的使用习惯设计入口；月历、农历、天气与世界时间，在两个平台都能使用。",
+          viewLarge: "放大交互预览 ↗", closePreview: "关闭预览", closeDetail: "关闭日期详情", dismissCalendar: "收起日历", platformTabs: "平台预览", windowsTrigger: "点击任务栏时间打开日历", macTrigger: "点击菜单栏图标打开日历", dayDetail: "查看日期详情：",
+          windowsShotAlt: "可点击任务栏时间和日历日期的 Windows 11 桌面预览",
+          macShotAlt: "可点击菜单栏图标和日历日期的 macOS 桌面预览",
+          platformsTitle: "两种桌面，同样顺手。", platformsIntro: "主面板默认展开；点击菜单栏图标或任务栏时间可切换显示，点击日期查看详情，点击桌面空白处收起。",
           windowsDesc: "从任务栏时钟打开日历面板，不打断当前工作；快速查看月历、农历与节假日，右键还能进入设置。",
           windowsTag1: "任务栏时钟入口", windowsTag2: "节假日 / 调休标记", windowsTag3: "日期详情",
-          windowsStatus: "Windows 11 桌面合成展示；应用面板来自真实浏览器预览截图。",
+          windowsStatus: "桌面与应用界面合成示意；天气、黄历为示例数据。",
           macDesc: "从菜单栏图标展开日历面板，点按空白处即可收起；可调整菜单栏图标样式，保持桌面整洁。",
           macTag1: "菜单栏图标入口", macTag2: "菜单栏样式设置", macTag3: "点按外部收起",
-          macStatus: "macOS 27 桌面合成展示，非 macOS 实机截图；应用面板来自浏览器预览。",
+          macStatus: "桌面与应用界面合成示意；天气、黄历为示例数据。",
           featuresLabel: "功能亮点", feature1Number: "01 / 随手打开", feature1Title: "日历就在手边",
           feature1Desc: "从 Windows 任务栏时钟或 macOS 菜单栏打开日历面板。",
           feature2Number: "02 / 看得更多", feature2Title: "日期，不止日期",
@@ -313,15 +406,16 @@
           download: "Download latest release", source: "View source", releaseNote: "Visit GitHub Releases to choose the installer for your system.",
           screenshotAlt: "Actual dogeCalendar month view rendered in a Windows browser preview, showing lunar dates and holiday markers",
           screenshotCaption: "Windows app UI · Local browser preview capture",
-          windowsShotAlt: "Windows 11 desktop composite showing the dogeCalendar main panel open beside the taskbar clock",
-          macShotAlt: "macOS 27 desktop composite showing the dogeCalendar main panel open under the menu bar; not a Mac screenshot",
-          platformsTitle: "Two desktops. One easy habit.", platformsIntro: "Designed around each system's familiar entry point. The calendar, lunar dates, weather and world clocks work on both platforms.",
+          viewLarge: "Enlarge interactive preview ↗", closePreview: "Close preview", closeDetail: "Close date details", dismissCalendar: "Dismiss calendar", platformTabs: "Platform preview", windowsTrigger: "Click taskbar clock to open calendar", macTrigger: "Click menu bar icon to open calendar", dayDetail: "View date details: ",
+          windowsShotAlt: "Interactive Windows 11 desktop preview: click the taskbar clock and calendar dates",
+          macShotAlt: "Interactive macOS desktop preview: click the menu bar icon and calendar dates",
+          platformsTitle: "Two desktops. One easy habit.", platformsIntro: "The calendar starts open. Click the menu bar icon or taskbar clock to toggle it, select a date for details, or click the desktop to dismiss it.",
           windowsDesc: "Open the calendar from the taskbar clock without breaking your flow. Check lunar dates and holidays, or right-click for settings.",
           windowsTag1: "Taskbar clock access", windowsTag2: "Holiday markers", windowsTag3: "Date details",
-          windowsStatus: "Windows 11 desktop composite; the app panel is an actual browser preview capture.",
+          windowsStatus: "Desktop and app UI composite; weather and almanac values are examples.",
           macDesc: "Open the calendar from the menu bar and dismiss it by clicking outside. Customize the menu bar icon to keep your desktop tidy.",
           macTag1: "Menu bar access", macTag2: "Customizable icon", macTag3: "Click away to dismiss",
-          macStatus: "macOS 27 desktop composite, not a Mac capture; the app panel comes from a browser preview.",
+          macStatus: "Desktop and app UI composite; weather and almanac values are examples.",
           featuresLabel: "Highlights", feature1Number: "01 / READY WHEN YOU ARE", feature1Title: "Always within reach",
           feature1Desc: "Open it from the Windows taskbar clock or the macOS menu bar.",
           feature2Number: "02 / MORE THAN A DATE", feature2Title: "The details matter",
@@ -346,6 +440,7 @@
         document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = copy[node.dataset.i18n]; });
         document.querySelectorAll("[data-i18n-aria]").forEach((node) => { node.setAttribute("aria-label", copy[node.dataset.i18nAria]); });
         document.querySelectorAll("[data-i18n-alt]").forEach((node) => { node.alt = copy[node.dataset.i18nAlt]; });
+        document.querySelectorAll(".platform-scene").forEach(fillSceneDays);
         languageToggle.title = languageToggle.ariaLabel = language === "zh" ? "Switch to English" : "切换到中文";
         applyTheme(document.documentElement.dataset.theme);
       }
@@ -353,8 +448,7 @@
       function applyTheme(theme) {
         document.documentElement.dataset.theme = theme;
         screenshot.src = theme === "dark" ? "./windows-app-dark.png" : "./windows-app.png";
-        document.getElementById("windows-desktop").src = `./windows-desktop-${theme}.png`;
-        document.getElementById("macos-desktop").src = `./macos-desktop-${theme}.png`;
+        document.querySelectorAll("[data-scene-image]").forEach((image) => { image.src = `./${image.dataset.sceneImage}-desktop-${theme}.png`; });
         const copy = translations[document.documentElement.dataset.language || "zh"];
         const nextTheme = theme === "dark" ? copy.lightMode : copy.darkMode;
         toggle.setAttribute("aria-label", document.documentElement.lang === "en" ? `Switch to ${nextTheme}${copy.modeSuffix}` : `切换到${nextTheme}${copy.modeSuffix}`);
@@ -366,6 +460,98 @@
         try { return localStorage.getItem(themeKey); } catch { return null; }
       }
 
+      function selectPlatform(platform) {
+        for (const name of ["windows", "mac"]) {
+          const selected = name === platform;
+          const tab = document.getElementById(`tab-${name}`);
+          tab.setAttribute("aria-selected", String(selected));
+          tab.tabIndex = selected ? 0 : -1;
+          document.getElementById(`panel-${name}`).hidden = !selected;
+          if (selected) setSceneOpen(document.querySelector(`#panel-${name} .platform-scene`), true);
+        }
+      }
+
+      function setSceneOpen(scene, open) {
+        scene.querySelector(".scene-calendar").hidden = !open;
+        scene.querySelector(".scene-days").hidden = !open;
+        scene.querySelector(".scene-detail").hidden = true;
+        scene.querySelectorAll(".scene-days button").forEach((button) => button.setAttribute("aria-pressed", "false"));
+        scene.querySelector(".scene-trigger").setAttribute("aria-expanded", String(open));
+      }
+
+      function fillSceneDays(scene) {
+        const grid = scene.querySelector(".scene-days");
+        grid.replaceChildren();
+        const language = document.documentElement.dataset.language || "zh";
+        for (let index = 0; index < 42; index++) {
+          const date = new Date(2026, 8, index);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.date = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+          button.setAttribute("aria-label", `${translations[language].dayDetail}${date.toLocaleDateString(language === "en" ? "en-US" : "zh-CN", { year: "numeric", month: "long", day: "numeric" })}`);
+          grid.append(button);
+        }
+      }
+
+      function showSceneDetail(scene, dateValue) {
+        const date = new Date(`${dateValue}T12:00:00`);
+        const language = document.documentElement.dataset.language;
+        const locale = language === "en" ? "en-US" : "zh-CN";
+        const detail = scene.querySelector(".scene-detail");
+        scene.querySelectorAll(".scene-days button").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.date === dateValue));
+        });
+        detail.querySelector(".scene-detail-day").textContent = date.getDate();
+        detail.querySelector(".scene-detail-month strong").textContent = language === "en"
+          ? date.toLocaleDateString(locale, { year: "numeric", month: "long" })
+          : `${date.getFullYear()}年${date.getMonth() + 1}月`;
+        detail.querySelector(".scene-detail-month small").textContent = date.toLocaleDateString(locale, { weekday: "long" });
+        try {
+          detail.querySelector(".scene-detail-lunar span").textContent = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", { month: "long", day: "numeric" }).format(date);
+        } catch {
+          detail.querySelector(".scene-detail-lunar span").textContent = "";
+        }
+        detail.hidden = false;
+      }
+
+      const sceneDialog = document.getElementById("scene-dialog");
+      document.querySelectorAll(".platform-scene").forEach(fillSceneDays);
+      selectPlatform(/Macintosh|Mac OS X|Mac_PowerPC/i.test(navigator.userAgent) ? "mac" : "windows");
+      document.querySelectorAll(".platform-tab").forEach((tab) => {
+        tab.addEventListener("click", () => selectPlatform(tab.id === "tab-mac" ? "mac" : "windows"));
+        tab.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const next = tab.id === "tab-mac" ? "windows" : "mac";
+          selectPlatform(next);
+          document.getElementById(`tab-${next}`).focus();
+        });
+      });
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        const scene = target.closest(".platform-scene");
+        if (scene) {
+          if (target.closest(".scene-trigger")) {
+            setSceneOpen(scene, scene.querySelector(".scene-calendar").hidden);
+          } else if (target.closest(".scene-dismiss")) {
+            setSceneOpen(scene, false);
+          } else if (target.closest(".scene-detail-close")) {
+            scene.querySelector(".scene-detail").hidden = true;
+          } else if (target.closest(".scene-days button")) {
+            showSceneDetail(scene, target.closest("button").dataset.date);
+          }
+        }
+        const view = target.closest(".scene-view");
+        if (view) {
+          const card = view.closest(".platform-card");
+          sceneDialog.querySelector("#scene-dialog-title").textContent = card.querySelector(".platform-name").textContent;
+          sceneDialog.querySelector(".scene-dialog-stage").replaceChildren(card.querySelector(".platform-scene").cloneNode(true));
+          sceneDialog.showModal();
+        }
+      });
+      document.getElementById("scene-dialog-close").addEventListener("click", () => sceneDialog.close());
+      sceneDialog.addEventListener("click", (event) => { if (event.target === sceneDialog) sceneDialog.close(); });
+
       applyLanguage(savedLanguage() === "en" ? "en" : "zh");
       languageToggle.addEventListener("click", () => {
         const language = document.documentElement.dataset.language === "zh" ? "en" : "zh";
@@ -373,24 +559,45 @@
         try { localStorage.setItem(languageKey, language); } catch { /* Private browsing may disable storage. */ }
       });
       toggle.addEventListener("click", () => {
-        if (document.querySelector(".page-turn-overlay")) return;
+        if (document.querySelector(".theme-transition-layer")) return;
         const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-        const oldStyle = getComputedStyle(document.documentElement);
-        const overlay = document.createElement("div");
-        overlay.className = "page-turn-overlay";
-        overlay.setAttribute("aria-hidden", "true");
-        for (const property of oldStyle) {
-          if (property.startsWith("--")) overlay.style.setProperty(property, oldStyle.getPropertyValue(property));
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const bounds = toggle.getBoundingClientRect();
+          const x = bounds.left + bounds.width / 2;
+          const y = bounds.top + bounds.height / 2;
+          const snapshot = (className, revealOrigin = false) => {
+            const style = getComputedStyle(document.documentElement);
+            const layer = document.createElement("div");
+            layer.className = `theme-transition-layer ${className}`;
+            layer.setAttribute("aria-hidden", "true");
+            layer.inert = true;
+            if (revealOrigin) {
+              layer.style.setProperty("--reveal-x", `${x}px`);
+              layer.style.setProperty("--reveal-y", `${y}px`);
+            }
+            layer.style.setProperty("--scroll-y", `${window.scrollY}px`);
+            for (const property of style) {
+              if (property.startsWith("--")) layer.style.setProperty(property, style.getPropertyValue(property));
+            }
+            layer.style.fontFamily = style.fontFamily;
+            const page = document.querySelector(".page").cloneNode(true);
+            page.style.transform = `translateY(-${window.scrollY}px)`;
+            layer.append(page);
+            document.body.append(layer);
+            return layer;
+          };
+          const underlay = snapshot("theme-reveal-underlay");
+          applyTheme(nextTheme);
+          const overlay = snapshot("theme-reveal-overlay", true);
+          const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+          const reveal = overlay.animate([
+            { clipPath: `circle(0px at ${x}px ${y}px)` },
+            { clipPath: `circle(${radius}px at ${x}px ${y}px)` }
+          ], { duration: 800, easing: "cubic-bezier(.55, 0, 1, .75)", fill: "forwards" });
+          reveal.finished.finally(() => { overlay.remove(); underlay.remove(); });
+        } else {
+          applyTheme(nextTheme);
         }
-        overlay.style.fontFamily = oldStyle.fontFamily;
-        const page = document.querySelector(".page").cloneNode(true);
-        page.style.transform = `translateY(-${window.scrollY}px)`;
-        overlay.append(page);
-        overlay.style.animationPlayState = "paused";
-        document.body.append(overlay);
-        overlay.addEventListener("animationend", () => overlay.remove(), { once: true });
-        requestAnimationFrame(() => { overlay.style.animationPlayState = "running"; });
-        applyTheme(nextTheme);
         try { localStorage.setItem(themeKey, nextTheme); } catch { /* Private browsing may disable storage. */ }
       });
       systemTheme.addEventListener("change", (event) => {

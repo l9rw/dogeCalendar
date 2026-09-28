@@ -130,6 +130,11 @@ export function SettingsPanel({
   const { t, inChinese } = useMemo(() => translator(store.language), [store.language]);
   const [view, setView] = useState<View>(initialView ?? "menu");
   const [appVer, setAppVer] = useState(appVersion);
+  const [glassAvailable, setGlassAvailable] = useState(() => document.documentElement.dataset.nativeGlass === "true");
+
+  useEffect(() => {
+    if (isMac) void invoke<boolean>("macos_glass_enabled").then(setGlassAvailable).catch(console.error);
+  }, [isMac]);
 
   useEffect(() => {
     if (!appVersion) void getVersion().then(setAppVer).catch(console.error);
@@ -247,6 +252,24 @@ export function SettingsPanel({
             onSelect={(hex) => store.setBackground(hex, effectiveDark)}
             inChinese={inChinese}
           />
+          {glassAvailable && (
+            <div className="settings-section glass-opacity-setting">
+              <label className="section-label" htmlFor="glass-opacity">{t("appearance.glassOpacity")}</label>
+              <div className="glass-opacity-control">
+                <input
+                  id="glass-opacity"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={store.appearance.glassOpacity}
+                  onChange={(event) => store.setGlassOpacity(Number(event.target.value))}
+                />
+                <output htmlFor="glass-opacity">{Math.round(store.appearance.glassOpacity)}%</output>
+              </div>
+              <p className="settings-description">{t("appearance.glassOpacity.desc")}</p>
+            </div>
+          )}
         </>
       ) : view === "calendar" ? (
         <>

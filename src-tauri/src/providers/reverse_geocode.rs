@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
 // Keyless reverse-geocoding endpoint. `localityLanguage` controls the
-// language of the returned locality/country names so the weather location
-// label follows the app's configured language.
+// language of the returned locality names so the weather location label
+// follows the app's configured language.
 const ENDPOINT: &str = "https://api.bigdatacloud.net/data/reverse-geocode-client";
 
 #[derive(Debug, Deserialize)]
@@ -15,8 +15,6 @@ struct ReverseResponse {
     name: Option<String>,
     #[serde(default, rename = "principalSubdivision")]
     principal_subdivision: Option<String>,
-    #[serde(default, rename = "countryName")]
-    country_name: Option<String>,
 }
 
 pub async fn resolve_label(
@@ -47,19 +45,11 @@ pub async fn resolve_label(
         .or(body.name)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let country = body
-        .country_name
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let label = match (city, country) {
-        (Some(city), Some(country)) => format!("{city}, {country}"),
-        (Some(city), None) => city,
-        (None, Some(country)) => country,
-        _ => body
-            .principal_subdivision
+    let label = city.unwrap_or_else(|| {
+        body.principal_subdivision
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "当前位置".to_string()),
-    };
+            .unwrap_or_else(|| "当前位置".to_string())
+    });
     Ok(label)
 }

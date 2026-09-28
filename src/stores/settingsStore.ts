@@ -15,6 +15,7 @@ export type Appearance = {
   lightBackground: string;
   darkAccent: string;
   darkBackground: string;
+  glassOpacity: number;
 };
 
 export type CalendarPrefs = {
@@ -45,6 +46,7 @@ export type SettingsState = {
   setTheme: (theme: Theme) => void;
   setAccent: (hex: string, dark: boolean) => void;
   setBackground: (hex: string, dark: boolean) => void;
+  setGlassOpacity: (opacity: number) => void;
   setLanguage: (language: Language) => void;
   setCalendarPref: <K extends keyof CalendarPrefs>(key: K, value: CalendarPrefs[K]) => void;
   setUpdatePref: <K extends keyof UpdatePrefs>(key: K, value: UpdatePrefs[K]) => void;
@@ -69,6 +71,7 @@ const defaults: Persisted = {
     lightBackground: DEFAULT_LIGHT_BACKGROUND,
     darkAccent: DEFAULT_ACCENT,
     darkBackground: DEFAULT_DARK_BACKGROUND,
+    glassOpacity: 12,
   },
   language: "system",
   calendar: {
@@ -91,9 +94,16 @@ function load(): Persisted {
       return legacyTheme ? { ...defaults, theme: legacyTheme } : defaults;
     }
     const parsed = JSON.parse(raw) as Partial<Persisted>;
+    const savedOpacity = parsed.appearance?.glassOpacity;
     return {
       theme: parsed.theme ?? defaults.theme,
-      appearance: { ...defaults.appearance, ...parsed.appearance },
+      appearance: {
+        ...defaults.appearance,
+        ...parsed.appearance,
+        glassOpacity: typeof savedOpacity === "number" && Number.isFinite(savedOpacity)
+          ? Math.max(0, Math.min(100, savedOpacity))
+          : defaults.appearance.glassOpacity,
+      },
       language: parsed.language ?? defaults.language,
       calendar: { ...defaults.calendar, ...parsed.calendar },
       update: { ...defaults.update, ...parsed.update },
@@ -145,6 +155,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       if (dark) appearance.darkBackground = hex;
       else appearance.lightBackground = hex;
       set({ appearance });
+      persist(get());
+    },
+    setGlassOpacity: (opacity) => {
+      if (!Number.isFinite(opacity)) return;
+      set({ appearance: { ...get().appearance, glassOpacity: Math.max(0, Math.min(100, opacity)) } });
       persist(get());
     },
     setLanguage: (language) => {

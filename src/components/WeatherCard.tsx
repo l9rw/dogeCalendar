@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useInfoStore } from "../stores/infoStore";
 
 const ICONS: Record<string, string> = {
@@ -29,6 +29,7 @@ function forecastDate(value: string, index: number) {
 }
 
 export function WeatherCard() {
+  const [refreshing, setRefreshing] = useState(false);
   const weather = useInfoStore((state) => state.weather);
   const loading = useInfoStore((state) => state.loadingWeather);
   const error = useInfoStore((state) => state.weatherError);
@@ -40,8 +41,17 @@ export function WeatherCard() {
   }, [loadLocation, loadWeather]);
 
   const data = weather?.data ?? null;
+  const refresh = async () => {
+    if (loading || refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([loadWeather(), new Promise<void>((resolve) => window.setTimeout(resolve, 500))]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
-  if (!data && loading) {
+  if (!data && loading && !refreshing) {
     return (
       <div className="weather-card weather-loading">
         <span>正在获取天气…</span>
@@ -55,8 +65,8 @@ export function WeatherCard() {
         <span className="weather-empty-text">
           {error ?? "暂无天气信息"}
         </span>
-        <button className="weather-refresh" onClick={() => loadWeather()} aria-label="获取天气" title="获取天气">
-          <RefreshIcon />
+        <button className="weather-refresh" disabled={loading} onClick={() => void refresh()} aria-label={loading ? "刷新中" : "获取天气"} title={loading ? "刷新中" : "获取天气"}>
+          <RefreshIcon spinning={loading || refreshing} />
         </button>
       </div>
     );
@@ -72,7 +82,7 @@ export function WeatherCard() {
         </div>
       </div>
       <div className="weather-meta">
-        <span className="weather-place">{data.location_label}</span>
+        <span className="weather-place">{data.location_label.split(",")[0].trim()}</span>
         {data.apparent_temperature != null && (
           <span>体感 {Math.round(data.apparent_temperature)}°</span>
         )}
@@ -83,12 +93,12 @@ export function WeatherCard() {
       </div>
       <button
         className="weather-refresh"
-        disabled={loading}
-        onClick={() => loadWeather()}
-        aria-label={loading ? "刷新中" : "刷新天气"}
-        title={loading ? "刷新中" : "刷新天气"}
+        disabled={loading || refreshing}
+        onClick={() => void refresh()}
+        aria-label={loading || refreshing ? "刷新中" : "刷新天气"}
+        title={loading || refreshing ? "刷新中" : "刷新天气"}
       >
-        <RefreshIcon spinning={loading} />
+        <RefreshIcon spinning={loading || refreshing} />
       </button>
       {!!data.forecast?.length && (
         <div className="weather-forecast" aria-label="未来三天天气">

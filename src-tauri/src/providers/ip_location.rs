@@ -23,10 +23,6 @@ struct IpResponse {
     #[serde(default)]
     region: Option<String>,
     #[serde(default)]
-    country: Option<String>,
-    #[serde(default)]
-    country_name: Option<String>,
-    #[serde(default)]
     capital: Option<String>,
     // ipinfo.io packs coordinates into a "lat,lon" string.
     #[serde(default)]
@@ -79,20 +75,12 @@ fn parse(text: &str) -> Result<StoredLocation, String> {
         }
     };
 
-    let country_name = body
-        .country_name
-        .or(body.country)
-        .filter(|s| !s.is_empty());
-    let city = body.city.filter(|s| !s.is_empty());
-    let label = match (city.as_ref(), country_name.as_ref()) {
-        (Some(city), Some(country)) => format!("{city}, {country}"),
-        (Some(city), None) => city.clone(),
-        (None, Some(country)) => country.clone(),
-        _ => body
-            .region
-            .or(body.capital)
-            .unwrap_or_else(|| "当前位置".to_string()),
-    };
+    let label = body
+        .city
+        .or(body.region)
+        .or(body.capital)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "当前位置".to_string());
 
     Ok(StoredLocation {
         latitude,

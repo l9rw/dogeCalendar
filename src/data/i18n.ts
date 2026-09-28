@@ -28,6 +28,8 @@ const zh: Dict = {
   "appearance.accentColor": "强调色",
   "appearance.backgroundColor": "背景颜色",
   "appearance.theme": "主题",
+  "appearance.glassOpacity": "玻璃背景不透明度",
+  "appearance.glassOpacity.desc": "调节背景遮罩强度，0% 最透明，100% 不透明。",
 
   "calendar.startWeekOn": "星期开始于",
   "calendar.showLunar": "显示农历",
@@ -122,6 +124,8 @@ const en: Dict = {
   "appearance.accentColor": "Accent color",
   "appearance.backgroundColor": "Background color",
   "appearance.theme": "Theme",
+  "appearance.glassOpacity": "Glass background opacity",
+  "appearance.glassOpacity.desc": "Adjust the background tint: 0% is clear, 100% is opaque.",
 
   "calendar.startWeekOn": "Start week on",
   "calendar.showLunar": "Show lunar calendar",

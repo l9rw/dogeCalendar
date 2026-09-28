@@ -1,6 +1,6 @@
 [package]
 name = "calendar-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight cross-platform desktop calendar"
 edition = "2021"
 
@@ -21,7 +21,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
-ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 semver = "1"
 
 [target.'cfg(windows)'.dependencies]
@@ -30,7 +29,7 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalizati
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3.2"
-objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSBitmapImageRep", "NSGraphicsContext", "NSFont", "NSColor", "NSStringDrawing", "NSAttributedString"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSWindow", "NSView", "NSGlassEffectView", "NSBitmapImageRep", "NSGraphicsContext", "NSGraphics", "NSFont", "NSColor", "NSStringDrawing", "NSAttributedString"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -8,6 +8,7 @@ use chrono::{Datelike, Local};
 use domain::MenuBarStyle;
 #[cfg(target_os = "macos")]
 use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::{Effect, EffectsBuilder},
 };
@@ -189,13 +190,33 @@ fn toggle_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
 #[cfg(target_os = "macos")]
 fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     use objc2_app_kit::{NSPopUpMenuWindowLevel, NSWindow, NSWindowCollectionBehavior};
+    use objc2_foundation::NSProcessInfo;
 
-    window.set_effects(
-        EffectsBuilder::new()
-            .effect(Effect::Menu)
-            .radius(16.0)
-            .build(),
-    )?;
+    if macos_glass_available() {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle};
+
+        let ns_window = window.ns_window()? as *mut NSWindow;
+        unsafe {
+            let native = &*ns_window;
+            if let Some(content) = native.contentView() {
+                let glass = NSGlassEffectView::new(MainThreadMarker::new().expect("panel requires main thread"));
+                glass.setFrame(content.frame());
+                glass.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
+                glass.setCornerRadius(16.0);
+                glass.setStyle(NSGlassEffectViewStyle::Regular);
+                glass.setContentView(Some(&content));
+                native.setContentView(Some(&glass));
+            }
+        }
+    } else {
+        window.set_effects(
+            EffectsBuilder::new()
+                .effect(Effect::Menu)
+                .radius(16.0)
+                .build(),
+        )?;
+    }
     window.set_shadow(true)?;
     let ns_window = window.ns_window()? as *mut NSWindow;
     // The window is created by Tauri; AppKit settings make it behave as a transient menu panel.
@@ -205,15 +226,33 @@ fn configure_macos_panel(window: &tauri::WebviewWindow) -> tauri::Result<()> {
         // Focus-loss handling below dismisses the panel without AppKit hiding it
         // during the activation change from the full-screen application.
         (*ns_window).setHidesOnDeactivate(false);
+        // FullScreenAuxiliary only joins our own app's full-screen windows. On
+        // macOS 13+, a floating overlay must explicitly join other apps' Spaces.
+        let fullscreen_behavior = if NSProcessInfo::processInfo().operatingSystemVersion().majorVersion >= 13 {
+            NSWindowCollectionBehavior::CanJoinAllApplications
+        } else {
+            NSWindowCollectionBehavior::FullScreenAuxiliary
+        };
         (*ns_window).setCollectionBehavior(
-            // Other apps' full-screen Spaces cannot be moved into. The popup
-            // needs to be present on every Space instead.
             NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::Transient
-                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+                | fullscreen_behavior,
         );
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_glass_available() -> bool {
+    use objc2_foundation::NSProcessInfo;
+
+    NSProcessInfo::processInfo().operatingSystemVersion().majorVersion >= 26
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn macos_glass_enabled() -> bool {
+    macos_glass_available()
 }
 
 #[cfg(target_os = "macos")]
@@ -393,11 +432,19 @@ fn show_calendar_below_tray(app: &tauri::AppHandle, rect: tauri::Rect) {
     if let Err(error) = window.set_position(position) {
         eprintln!("calendar tray: failed to position panel: {error}");
     }
-    // Tauri's show() makes the window key, and set_focus() activates our app.
-    // Either can switch away from another application's full-screen Space.
+    // A key window in an inactive app still requires a click before its webview
+    // receives input. Activate the accessory app when opening the calendar.
     match window.ns_window() {
         Ok(ns_window) => unsafe {
-            (*(ns_window as *mut objc2_app_kit::NSWindow)).orderFrontRegardless()
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::NSApplication;
+
+            let panel = &*(ns_window as *mut objc2_app_kit::NSWindow);
+            panel.orderFrontRegardless();
+            #[allow(deprecated)]
+            NSApplication::sharedApplication(MainThreadMarker::new().expect("menu bar requires main thread"))
+                .activateIgnoringOtherApps(true);
+            panel.makeKeyAndOrderFront(None);
         },
         Err(error) => eprintln!("calendar tray: failed to get native panel: {error}"),
     }
@@ -446,10 +493,42 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
 
     let style = app.state::<AppState>().store.data.lock().expect("store mutex poisoned").menu_bar_style;
     let icon = if style == MenuBarStyle::Calendar { menu_bar_icon() } else { menu_bar_date_icon(style) };
+    let menu = Menu::with_items(app, &[
+        &MenuItem::with_id(app, "open-calendar", "打开日历", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
+        &MenuItem::with_id(app, "menubar-settings", "标题栏设置", true, None::<&str>)?,
+        &MenuItem::with_id(app, "online-update", "在线更新", true, None::<&str>)?,
+        &MenuItem::with_id(app, "about", "关于", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
+    ])?;
     let tray = TrayIconBuilder::with_id("calendar-menu-bar")
         .icon(icon)
         .icon_as_template(style == MenuBarStyle::Calendar)
         .tooltip("日历")
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "quit" {
+                app.exit(0);
+                return;
+            }
+            let ui_event = match event.id().as_ref() {
+                "open-calendar" => None,
+                "settings" => Some("open-settings"),
+                "menubar-settings" => Some("open-menubar-settings"),
+                "online-update" => Some("open-update"),
+                "about" => Some("open-about"),
+                _ => return,
+            };
+            if let Some(tray) = app.tray_by_id("calendar-menu-bar") {
+                if let Ok(Some(rect)) = tray.rect() {
+                    show_calendar_below_tray(app, rect);
+                }
+            }
+            if let Some(ui_event) = ui_event {
+                let _ = app.emit(ui_event, ());
+            }
+        })
         .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
                 rect,
@@ -469,9 +548,18 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
                             let _ = app.emit("taskbar-calendar-click", ());
                         }
                         MouseButton::Right => {
-                            PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
-                            show_calendar_below_tray(app, rect);
-                            let _ = app.emit("taskbar-calendar-context", ());
+                            // A permanently attached NSMenu intercepts left clicks on the status item.
+                            // Attach it only while displaying the native right-click menu.
+                            if let Err(error) = tray.set_menu(Some(menu.clone())) {
+                                eprintln!("calendar tray: failed to attach menu: {error}");
+                                return;
+                            }
+                            if let Err(error) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
+                                eprintln!("calendar tray: failed to show menu: {error}");
+                            }
+                            if let Err(error) = tray.set_menu(None::<Menu<tauri::Wry>>) {
+                                eprintln!("calendar tray: failed to detach menu: {error}");
+                            }
                         }
                         _ => {}
                     }
@@ -532,20 +620,6 @@ async fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<Strin
     } else {
         300.0
     };
-    if let Some(window) = app.get_webview_window(label) {
-        if label == "detail" {
-            if let Some(date) = date {
-                app.emit_to(label, "detail-date-changed", date)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
-        if !window.is_visible().map_err(|error| error.to_string())? {
-            window.show().map_err(|error| error.to_string())?;
-            window.set_focus().map_err(|error| error.to_string())?;
-        }
-        return Ok(());
-    }
-
     let (left, top, right, bottom) = if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
         #[cfg(target_os = "macos")]
         let (position, size) = (monitor.work_area().position, monitor.work_area().size);
@@ -565,6 +639,26 @@ async fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<Strin
         main_pos.x + main_size.width + 12.0
     }.clamp(left, (right - width).max(left));
     let y = main_pos.y.clamp(top, (bottom - height).max(top));
+    if let Some(window) = app.get_webview_window(label) {
+        if label == "detail" {
+            window.set_position(tauri::LogicalPosition::new(x, y))
+                .map_err(|error| error.to_string())?;
+            if let Some(date) = date {
+                app.emit_to(label, "detail-date-changed", date)
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        if !window.is_visible().map_err(|error| error.to_string())? {
+            #[cfg(target_os = "macos")]
+            show_macos_aux_panel(window, false).await?;
+            #[cfg(not(target_os = "macos"))]
+            {
+                window.show().map_err(|error| error.to_string())?;
+                window.set_focus().map_err(|error| error.to_string())?;
+            }
+        }
+        return Ok(());
+    }
     let url = if label == "detail" {
         format!("?panel=detail&date={}", date.unwrap_or_default())
     } else {
@@ -578,12 +672,52 @@ async fn open_aux_panel(app: tauri::AppHandle, panel: String, date: Option<Strin
         .decorations(false)
         .transparent(true)
         .skip_taskbar(true)
+        .accept_first_mouse(true)
+        .visible(!cfg!(target_os = "macos"))
+        .focused(!cfg!(target_os = "macos") || label != "detail")
         .build()
         .map_err(|error| error.to_string())?;
     #[cfg(target_os = "macos")]
-    configure_macos_panel(&window).map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
-    Ok(())
+    {
+        show_macos_aux_panel(window, true).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.set_focus().map_err(|error| error.to_string())?;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn show_macos_aux_panel(window: tauri::WebviewWindow, newly_created: bool) -> Result<(), String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let app = window.app_handle().clone();
+    let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
+    app.run_on_main_thread(move || {
+        let result = (|| -> tauri::Result<()> {
+            if newly_created {
+                configure_macos_panel(&window)?;
+            }
+            if window.label() == "detail" {
+                let native = window.ns_window()? as *mut objc2_app_kit::NSWindow;
+                let parent = main.ns_window()? as *mut objc2_app_kit::NSWindow;
+                unsafe {
+                    if newly_created {
+                        // Follow the main panel into the full-screen Space it joined.
+                        (*parent).addChildWindow_ordered(&*native, objc2_app_kit::NSWindowOrderingMode::Above);
+                    }
+                    // show() makes the window key; keep the calendar interactive.
+                    (*native).orderFrontRegardless();
+                }
+            } else {
+                window.show()?;
+                window.set_focus()?;
+            }
+            Ok(())
+        })().map_err(|error| error.to_string());
+        let _ = sender.send(result);
+    }).map_err(|error| error.to_string())?;
+    receiver.await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -595,120 +729,6 @@ fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
         window.hide().map_err(|error| error.to_string())?;
     }
     Ok(())
-}
-
-fn huangli_split_list(value: &str) -> Vec<String> {
-    value
-        .split(['.', '，', ',', '、', ' ', '/'])
-        .map(|item| item.trim().to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-fn huangli_normalize(json: &serde_json::Value, date: &str, source: &str) -> Option<serde_json::Value> {
-    if json["code"].as_i64() != Some(200) || json["data"]["solar"]["full"].as_str() != Some(date) {
-        return None;
-    }
-    let data = &json["data"];
-    let yi = data["taboo"]["day"]["recommends"].as_str()?;
-    let ji = data["taboo"]["day"]["avoids"].as_str()?;
-    if yi.is_empty() && ji.is_empty() {
-        return None;
-    }
-    let ganzhi = ["year", "month", "day"]
-        .iter()
-        .filter_map(|part| data["sixty_cycle"][*part]["name"].as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    Some(serde_json::json!({
-        "source": source,
-        "lunar": data["lunar"]["desc_short"].as_str().unwrap_or(""),
-        "ganzhi": ganzhi,
-        "week": data["solar"]["week_desc"].as_str().unwrap_or(""),
-        "xingzuo": data["constellation"]["name"].as_str().unwrap_or(""),
-        "shengxiao": data["zodiac"]["year"].as_str().unwrap_or(""),
-        "festival": data["festival"]["both_desc"].as_str()
-            .or_else(|| data["legal_holiday"]["name"].as_str()).unwrap_or(""),
-        "jieqi": data["term"]["today"]["name"].as_str().unwrap_or(""),
-        "yi": huangli_split_list(yi),
-        "ji": huangli_split_list(ji),
-        "pengsheng": "",
-        "baiji": "",
-        "zhushen": "",
-        "taishen": "",
-    }))
-}
-
-fn huangli_request(agent: &ureq::Agent, url: &str, date: &str, source: &str) -> Option<serde_json::Value> {
-    let response = agent.get(url).call().ok()?;
-    let json: serde_json::Value = response.into_json().ok()?;
-    huangli_normalize(&json, date, source)
-}
-
-#[tauri::command]
-fn fetch_huangli(date: String) -> Result<serde_json::Value, String> {
-    let parsed = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
-        .map_err(|_| "日期格式无效".to_string())?;
-    if parsed.format("%Y-%m-%d").to_string() != date {
-        return Err("日期格式无效".into());
-    }
-    let agent = ureq::AgentBuilder::new()
-        .user_agent("Calendar/0.1.0")
-        .timeout(std::time::Duration::from_secs(8))
-        .build();
-
-    for (host, source) in [("60s.viki.moe", "60s"), ("60s.7se.cn", "60s mirror")] {
-        let url = format!("https://{host}/v2/lunar?date={date}");
-        if let Some(data) = huangli_request(&agent, &url, &date, source) {
-            return Ok(data);
-        }
-    }
-
-    Err(format!("黄历接口暂时不可用: {}", date))
-}
-
-#[cfg(test)]
-mod huangli_tests {
-    use super::*;
-
-    #[test]
-    fn maps_60s_daily_data() {
-        let json = serde_json::json!({
-            "code": 200,
-            "data": {
-                "solar": { "full": "2026-09-27", "week_desc": "星期日" },
-                "lunar": { "desc_short": "农历丙午年八月十七" },
-                "sixty_cycle": { "year": { "name": "丙午年" }, "month": { "name": "丁酉月" }, "day": { "name": "甲辰日" } },
-                "taboo": { "day": { "recommends": "嫁娶.纳采", "avoids": "开市.安葬" } }
-            }
-        });
-        let result = huangli_normalize(&json, "2026-09-27", "60s").unwrap();
-        assert_eq!(result["yi"], serde_json::json!(["嫁娶", "纳采"]));
-        assert_eq!(result["ji"], serde_json::json!(["开市", "安葬"]));
-        assert_eq!(result["ganzhi"], "丙午年 丁酉月 甲辰日");
-        assert_eq!(result["lunar"], "农历丙午年八月十七");
-        assert_eq!(result["source"], "60s");
-    }
-
-    #[test]
-    fn rejects_failed_or_wrong_date_responses() {
-        let json = serde_json::json!({
-            "code": 200,
-            "data": { "solar": { "full": "2026-03-02" }, "taboo": { "day": { "recommends": "祭祀", "avoids": "出行" } } }
-        });
-        assert!(huangli_normalize(&json, "2026-02-30", "60s").is_none());
-        assert!(huangli_normalize(&serde_json::json!({ "code": 429, "data": json["data"] }), "2026-03-02", "60s").is_none());
-        assert!(huangli_normalize(&serde_json::json!({
-            "code": 200,
-            "data": { "solar": { "full": "2026-03-02" }, "taboo": { "day": { "recommends": "", "avoids": "" } } }
-        }), "2026-03-02", "60s").is_none());
-    }
-
-    #[test]
-    fn rejects_invalid_dates_before_request() {
-        assert!(fetch_huangli("2026-02-30".into()).is_err());
-        assert!(fetch_huangli("2026-9-27".into()).is_err());
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -730,6 +750,8 @@ pub fn run() {
             menu_bar_style_get,
             #[cfg(target_os = "macos")]
             menu_bar_style_set,
+            #[cfg(target_os = "macos")]
+            macos_glass_enabled,
             quit_app,
             show_update_panel,
             commands::update::check_for_updates,
@@ -750,7 +772,6 @@ pub fn run() {
             commands::location::location_clear,
             commands::weather::weather_get,
             commands::weather::weather_clear_cache,
-            fetch_huangli,
         ])
         .setup(|app| {
             let dir = app
@@ -815,8 +836,11 @@ pub fn run() {
                     }
                 }
                 #[cfg(target_os = "macos")]
-                tauri::WindowEvent::Focused(true) if window.label() == "main" => {
-                    MAIN_PANEL_FOCUSED.store(true, Ordering::Relaxed);
+                tauri::WindowEvent::Focused(true) => {
+                    PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+                    if window.label() == "main" {
+                        MAIN_PANEL_FOCUSED.store(true, Ordering::Relaxed);
+                    }
                 }
                 tauri::WindowEvent::Focused(false) => {
                     #[cfg(target_os = "macos")]
@@ -825,34 +849,22 @@ pub fn run() {
                         eprintln!("calendar tray: {} lost focus", window.label());
                         let generation = PANEL_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
                         let window = window.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(120));
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
                             let app = window.app_handle().clone();
                             let _ = app.run_on_main_thread(move || {
                                 if PANEL_FOCUS_GENERATION.load(Ordering::Relaxed) != generation {
                                     return;
                                 }
-                                let main = window.app_handle().get_webview_window("main");
-                                let aux_focused = ["detail", "clock"].iter().any(|label| {
+                                let panel_focused = ["main", "detail", "clock"].iter().any(|label| {
                                     window
                                         .app_handle()
                                         .get_webview_window(label)
                                         .is_some_and(|aux| aux.is_focused().unwrap_or(false))
                                 });
-                                if window.label() != "main" && !window.is_focused().unwrap_or(false) {
-                                    #[cfg(debug_assertions)]
-                                    eprintln!("calendar tray: hiding unfocused {} panel", window.label());
-                                    let _ = window.hide();
-                                }
-                                if !aux_focused {
-                                    if let Some(main) = main {
-                                        if MAIN_PANEL_FOCUSED.load(Ordering::Relaxed)
-                                            && !main.is_focused().unwrap_or(false) {
-                                            #[cfg(debug_assertions)]
-                                            eprintln!("calendar tray: hiding unfocused main panel");
-                                            hide_main_panel(window.app_handle());
-                                        }
-                                    }
+                                // Moving between our panels is not dismissal.
+                                if !panel_focused && MAIN_PANEL_FOCUSED.load(Ordering::Relaxed) {
+                                    hide_main_panel(window.app_handle());
                                 }
                             });
                         });
