@@ -370,9 +370,9 @@ button { font: inherit; }
 .settings-divider { height: 1px; margin: 4px 0; background: var(--line); }
 
 :root[data-platform="macos"] { --mac-panel: rgba(250, 250, 252, .76); }
-[data-platform="macos"] { background: transparent; }
+[data-platform="macos"], [data-platform="windows"] { background: transparent; }
 [data-platform="macos"][data-theme="dark"] { --mac-panel: rgba(24, 26, 31, .78); }
-[data-platform="macos"] body { background: transparent; }
+[data-platform="macos"] body, [data-platform="windows"] body { background: transparent; }
 [data-platform="macos"] .calendar-shell,
 [data-platform="macos"] .aux-shell,
 [data-platform="macos"] .settings-panel { background: var(--mac-panel); }

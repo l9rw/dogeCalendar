@@ -399,6 +399,39 @@ function MenuBarSettings({ onBack, t }: { onBack: () => void; t: (key: string) =
 }
 
 function TaskbarDateSettings({ onBack, t }: { onBack: () => void; t: (key: string) => string }) {
+  const [timeFormat, setTimeFormat] = useState("");
+  const [currentTime, setCurrentTime] = useState("");
+  const [timePreview, setTimePreview] = useState("");
+  const [timeError, setTimeError] = useState("");
+  const [timeSaving, setTimeSaving] = useState(false);
+  useEffect(() => {
+    void invoke<string>("taskbar_time_format_get")
+      .then((format) => { setTimeFormat(format); setCurrentTime(format); })
+      .catch((error) => setTimeError(String(error)));
+  }, []);
+  useEffect(() => {
+    if (!timeFormat) { setTimePreview(""); return; }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void invoke<string>("taskbar_time_format_preview", { format: timeFormat })
+        .then((value) => { if (active) { setTimePreview(value); setTimeError(""); } })
+        .catch((error) => { if (active) { setTimePreview(""); setTimeError(String(error)); } });
+    }, 200);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [timeFormat]);
+  const applyTime = async () => {
+    setTimeSaving(true);
+    setTimeError("");
+    try {
+      const actual = await invoke<string>("taskbar_time_format_set", { format: timeFormat });
+      setTimeFormat(actual);
+      setCurrentTime(actual);
+    } catch (error) {
+      setTimeError(String(error));
+    } finally {
+      setTimeSaving(false);
+    }
+  };
   const [template, setTemplate] = useState("custom");
   const [custom, setCustom] = useState("");
   const [current, setCurrent] = useState("");
@@ -444,7 +477,26 @@ function TaskbarDateSettings({ onBack, t }: { onBack: () => void; t: (key: strin
   return (
     <>
       <BackRow onBack={onBack} />
-      <p className="settings-description">{t("settings.taskbarDate")}</p>
+      <p className="settings-description">{t("taskbarClock.description")}</p>
+      <div className="settings-section">
+        <label className="section-label" htmlFor="taskbar-time-format">{t("taskbarClock.timeFormat")}</label>
+        <div className="date-format-options">
+          {["HH:mm", "HH:mm:ss"].map((value) => (
+            <button key={value} type="button" className={`theme-option ${timeFormat === value ? "active" : ""}`} onClick={() => setTimeFormat(value)}>
+              <span className="theme-label">{value}</span>
+            </button>
+          ))}
+        </div>
+        <input id="taskbar-time-format" className="location-input date-format-input" value={timeFormat} maxLength={79}
+          placeholder="HH:mm:ss" onChange={(event) => setTimeFormat(event.target.value)} />
+        {timePreview && <p className="date-format-preview">{t("taskbarClock.preview")}：<strong>{timePreview}</strong></p>}
+        {timeError && <p className="date-format-error" role="alert">{timeError}</p>}
+        <button className="location-apply" disabled={timeSaving || !timeFormat || !!timeError || timeFormat === currentTime}
+          onClick={() => void applyTime()}>{timeSaving ? t("settings.saving") : t("settings.applyToWindows")}</button>
+      </div>
+      <p className="settings-description">{t("taskbarClock.timeCodes")}</p>
+      <div className="settings-divider" />
+      <p className="settings-description">{t("taskbarClock.dateFormat")}</p>
       <div className="date-format-options">
         {DATE_TEMPLATES.map(([value, label, example]) => (
           <button key={value} className={`theme-option ${template === value ? "active" : ""}`} aria-pressed={template === value} onClick={() => setTemplate(value)}>
@@ -458,6 +510,7 @@ function TaskbarDateSettings({ onBack, t }: { onBack: () => void; t: (key: strin
       {template === "custom" && (
         <input className="location-input date-format-input" aria-label="自定义日期格式" placeholder="例如 yyyy/M/d dddd" value={custom} maxLength={79} onChange={(event) => setCustom(event.target.value)} />
       )}
+      <p className="settings-description">{t("taskbarClock.dateCodes")}</p>
       {preview && <p className="date-format-preview">预览：<strong>{preview}</strong></p>}
       {error && <p className="date-format-error" role="alert">{error}</p>}
       <button className="location-apply" disabled={saving || !selectedFormat || selectedFormat === current} onClick={() => void apply()}>

@@ -9,7 +9,11 @@ use windows::Win32::{
         COINIT_MULTITHREADED,
     },
     UI::{
-        Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Children, TreeScope_Descendants},
+        Accessibility::{
+            CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern,
+            IUIAutomationLegacyIAccessiblePattern, TreeScope_Children, TreeScope_Descendants,
+            UIA_InvokePatternId, UIA_LegacyIAccessiblePatternId,
+        },
         WindowsAndMessaging::{GetWindowRect, IsWindowVisible},
     },
 };
@@ -88,7 +92,9 @@ pub(super) fn hover_rects() -> Vec<RECT> {
         .collect()
 }
 
-fn clock_bounds(automation: &IUIAutomation) -> windows::core::Result<Vec<ClockBounds>> {
+fn clock_buttons(
+    automation: &IUIAutomation,
+) -> windows::core::Result<Vec<(ClockBounds, IUIAutomationElement)>> {
     unsafe {
         let all = automation.CreateTrueCondition()?;
         let desktop = automation.GetRootElement()?;
@@ -132,14 +138,54 @@ fn clock_bounds(automation: &IUIAutomation) -> windows::core::Result<Vec<ClockBo
                         continue;
                     }
                 }
-                clocks.push(ClockBounds {
-                    taskbar: hwnd.0 as usize,
-                    taskbar_rect,
-                    clock_rect: button.CurrentBoundingRectangle()?,
-                });
+                clocks.push((
+                    ClockBounds {
+                        taskbar: hwnd.0 as usize,
+                        taskbar_rect,
+                        clock_rect: button.CurrentBoundingRectangle()?,
+                    },
+                    button,
+                ));
             }
         }
         Ok(clocks)
+    }
+}
+
+fn clock_bounds(automation: &IUIAutomation) -> windows::core::Result<Vec<ClockBounds>> {
+    Ok(clock_buttons(automation)?
+        .into_iter()
+        .map(|(bounds, _)| bounds)
+        .collect())
+}
+
+pub(super) fn open_system_clock(point: POINT) -> windows::core::Result<()> {
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+        let result = (|| {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            let (_, button) = clock_buttons(&automation)?
+                .into_iter()
+                .find(|(bounds, _)| {
+                    point_in_rect(point, bounds.taskbar_rect)
+                        && point_in_rect(point, bounds.clock_rect)
+                })
+                .ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
+            if let Ok(pattern) =
+                button.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+            {
+                pattern.Invoke()
+            } else {
+                button
+                    .GetCurrentPatternAs::<IUIAutomationLegacyIAccessiblePattern>(
+                        UIA_LegacyIAccessiblePatternId,
+                    )?
+                    .DoDefaultAction()
+            }
+        })();
+        CoUninitialize();
+        result
     }
 }
 

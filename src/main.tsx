@@ -15,11 +15,13 @@ document.documentElement.dataset.theme = dark ? "dark" : "light";
 document.documentElement.style.setProperty("--blue", accent);
 document.documentElement.style.setProperty("--shell-bg", background);
 document.documentElement.style.setProperty("--glass-opacity", `${settings.appearance.glassOpacity}%`);
-if ("__TAURI_INTERNALS__" in window && navigator.userAgent.includes("Macintosh")) {
-  document.documentElement.dataset.platform = "macos";
-  void invoke<boolean>("macos_glass_enabled").then((enabled) => {
-    if (enabled) document.documentElement.dataset.nativeGlass = "true";
-  }).catch(console.error);
+if ("__TAURI_INTERNALS__" in window) {
+  document.documentElement.dataset.platform = navigator.userAgent.includes("Macintosh") ? "macos" : "windows";
+  if (document.documentElement.dataset.platform === "macos") {
+    void invoke<boolean>("macos_glass_enabled").then((enabled) => {
+      if (enabled) document.documentElement.dataset.nativeGlass = "true";
+    }).catch(console.error);
+  }
 }
 
 createRoot(document.getElementById("root")!).render(

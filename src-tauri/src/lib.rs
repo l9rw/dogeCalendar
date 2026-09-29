@@ -5,6 +5,8 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(windows)]
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use chrono::{Datelike, Local};
 #[cfg(target_os = "macos")]
@@ -20,6 +22,8 @@ use tauri::{
 static PANEL_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "macos")]
 static MAIN_PANEL_FOCUSED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static WINDOWS_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 mod commands;
 mod domain;
@@ -36,7 +40,9 @@ mod taskbar_clock;
 use state::AppState;
 
 #[cfg(windows)]
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+#[cfg(windows)]
+use tauri_plugin_opener::OpenerExt;
 
 #[cfg(windows)]
 use windows::Win32::{
@@ -51,6 +57,20 @@ use windows::Win32::{
 
 #[cfg(windows)]
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+#[cfg(windows)]
+static SYSTEM_CLOCK_POINT: Mutex<POINT> = Mutex::new(POINT { x: 0, y: 0 });
+#[cfg(windows)]
+static SYSTEM_CLOCK_ACTIVE: Mutex<Option<(POINT, std::thread::JoinHandle<bool>)>> = Mutex::new(None);
+
+#[cfg(windows)]
+fn close_system_clock(clock_point: POINT, opened: std::thread::JoinHandle<bool>) {
+    // The menu action may still be opening the native panel when the next click arrives.
+    if opened.join().unwrap_or(false) {
+        if let Err(error) = taskbar_clock::open_system_clock(clock_point) {
+            eprintln!("calendar: failed to close system clock: {error}");
+        }
+    }
+}
 
 #[cfg(windows)]
 fn class_name(hwnd: HWND) -> String {
@@ -202,6 +222,10 @@ fn show_windows_context_menu(app: &tauri::AppHandle, x: i32, y: i32) -> tauri::R
         anchor_y - size.height as i32 - 4,
     ))?;
     let menu = Menu::with_items(app, &[
+        &MenuItem::with_id(app, "system-clock", "打开系统时间", true, None::<&str>)?,
+        &MenuItem::with_id(app, "system-date-time", "调整系统时间", true, None::<&str>)?,
+        &MenuItem::with_id(app, "system-notifications", "通知设置", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "open-calendar", "打开日历", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
@@ -210,6 +234,7 @@ fn show_windows_context_menu(app: &tauri::AppHandle, x: i32, y: i32) -> tauri::R
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?,
     ])?;
+    *SYSTEM_CLOCK_POINT.lock().expect("clock point mutex poisoned") = POINT { x, y };
     let mut point = POINT { x, y };
     if !unsafe { ScreenToClient(window.hwnd()?, &mut point) }.as_bool() {
         return window.popup_menu(&menu);
@@ -750,6 +775,12 @@ pub fn run() {
             date_format::taskbar_date_format_preview,
             #[cfg(windows)]
             date_format::taskbar_date_format_set,
+            #[cfg(windows)]
+            date_format::taskbar_time_format_get,
+            #[cfg(windows)]
+            date_format::taskbar_time_format_preview,
+            #[cfg(windows)]
+            date_format::taskbar_time_format_set,
             #[cfg(target_os = "macos")]
             menu_bar_style_get,
             #[cfg(target_os = "macos")]
@@ -791,6 +822,33 @@ pub fn run() {
             #[cfg(windows)]
             {
                 app.on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "system-clock" => {
+                            let point = *SYSTEM_CLOCK_POINT.lock().expect("clock point mutex poisoned");
+                            let opened = std::thread::spawn(move || {
+                                if let Err(error) = taskbar_clock::open_system_clock(point) {
+                                    eprintln!("calendar: failed to open system clock: {error}");
+                                    false
+                                } else {
+                                    true
+                                }
+                            });
+                            *SYSTEM_CLOCK_ACTIVE.lock().expect("system clock mutex poisoned") = Some((point, opened));
+                            return;
+                        }
+                        "system-date-time" | "system-notifications" => {
+                            let url = if event.id().as_ref() == "system-date-time" {
+                                "ms-settings:dateandtime"
+                            } else {
+                                "ms-settings:notifications"
+                            };
+                            if let Err(error) = app.opener().open_url(url, None::<&str>) {
+                                eprintln!("calendar: failed to open {url}: {error}");
+                            }
+                            return;
+                        }
+                        _ => {}
+                    }
                     if event.id().as_ref() == "quit" {
                         app.exit(0);
                         return;
@@ -827,6 +885,16 @@ pub fn run() {
                 let Some(y) = position.get("y").and_then(|value| value.as_i64()) else {
                     return;
                 };
+                #[cfg(windows)]
+                if let Some((clock_point, opened)) = SYSTEM_CLOCK_ACTIVE.lock().expect("system clock mutex poisoned").take() {
+                    let app = handle.clone();
+                    std::thread::spawn(move || {
+                        close_system_clock(clock_point, opened);
+                        let panel = app.clone();
+                        let _ = app.run_on_main_thread(move || toggle_calendar_at(&panel, x as i32, y as i32));
+                    });
+                    return;
+                }
                 toggle_calendar_at(&handle, x as i32, y as i32);
             });
 
@@ -844,8 +912,12 @@ pub fn run() {
                 };
                 #[cfg(windows)]
                 {
+                    let system_clock = SYSTEM_CLOCK_ACTIVE.lock().expect("system clock mutex poisoned").take();
                     let app = handle.clone();
                     std::thread::spawn(move || {
+                        if let Some((clock_point, opened)) = system_clock {
+                            close_system_clock(clock_point, opened);
+                        }
                         if let Err(error) = show_windows_context_menu(&app, x as i32, y as i32) {
                             eprintln!("calendar: failed to show native context menu: {error}");
                         }
@@ -881,6 +953,10 @@ pub fn run() {
                         MAIN_PANEL_FOCUSED.store(true, Ordering::Relaxed);
                     }
                 }
+                #[cfg(windows)]
+                tauri::WindowEvent::Focused(true) => {
+                    WINDOWS_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+                }
                 tauri::WindowEvent::Focused(false) => {
                     #[cfg(target_os = "macos")]
                     {
@@ -908,19 +984,40 @@ pub fn run() {
                             });
                         });
                     }
-                    #[cfg(not(target_os = "macos"))]
+                    #[cfg(windows)]
                     {
-                    let aux_visible = ["detail", "clock"].iter().any(|label| {
-                        window.app_handle().get_webview_window(label)
-                            .is_some_and(|aux| aux.is_visible().unwrap_or(false))
-                    });
-                    if window.label() != "main" || !aux_visible {
-                        if window.label() == "main" {
-                            hide_main_panel(window.app_handle());
-                        } else {
-                            let _ = window.hide();
-                        }
+                        let generation = WINDOWS_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                            let panel_app = app.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                if WINDOWS_FOCUS_GENERATION.load(Ordering::Relaxed) != generation {
+                                    return;
+                                }
+                                let panel_focused = ["main", "detail", "clock"].iter().any(|label| {
+                                    panel_app.get_webview_window(label)
+                                        .is_some_and(|panel| panel.is_focused().unwrap_or(false))
+                                });
+                                if !panel_focused {
+                                    hide_main_panel(&panel_app);
+                                }
+                            });
+                        });
                     }
+                    #[cfg(all(not(target_os = "macos"), not(windows)))]
+                    {
+                        let aux_visible = ["detail", "clock"].iter().any(|label| {
+                            window.app_handle().get_webview_window(label)
+                                .is_some_and(|aux| aux.is_visible().unwrap_or(false))
+                        });
+                        if window.label() != "main" || !aux_visible {
+                            if window.label() == "main" {
+                                hide_main_panel(window.app_handle());
+                            } else {
+                                let _ = window.hide();
+                            }
+                        }
                     }
                 }
                 _ => {}

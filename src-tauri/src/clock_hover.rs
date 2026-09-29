@@ -40,7 +40,6 @@ impl Pressed {
 }
 
 struct Overlay {
-    main: HWND,
     rect: RECT,
     pressed: Pressed,
 }
@@ -59,11 +58,7 @@ impl Controller {
     }
 
     unsafe fn refresh(&mut self) {
-        let mut rects = if IsWindowVisible(self.main).as_bool() {
-            crate::taskbar_clock::hover_rects()
-        } else {
-            Vec::new()
-        };
+        let mut rects = crate::taskbar_clock::hover_rects();
         rects.retain(|rect| dimensions(*rect).is_some());
         rects.sort_unstable_by_key(|rect| (rect.left, rect.top, rect.right, rect.bottom));
         rects.dedup();
@@ -92,7 +87,6 @@ impl Controller {
                     return;
                 };
                 let state = Box::into_raw(Box::new(Overlay {
-                    main: self.main,
                     rect,
                     pressed: Pressed::default(),
                 }));
@@ -159,11 +153,6 @@ unsafe extern "system" fn overlay_proc(
             }
             WM_SHOWWINDOW if wparam.0 == 0 => (*state).pressed = Pressed::default(),
             WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
-                if !IsWindowVisible((*state).main).as_bool() {
-                    (*state).pressed = Pressed::default();
-                    let _ = ShowWindow(hwnd, SW_HIDE);
-                    return LRESULT(0);
-                }
                 // No capture: leaving the overlay cancels this click entirely.
                 let mut tracking = TRACKMOUSEEVENT {
                     cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -183,8 +172,7 @@ unsafe extern "system" fn overlay_proc(
                 let rect = (*state).rect;
                 let mut point = POINT::default();
                 if let Some(event) = event {
-                    if IsWindowVisible((*state).main).as_bool()
-                        && crate::taskbar_clock::hover_rects().contains(&rect)
+                    if crate::taskbar_clock::hover_rects().contains(&rect)
                         && GetCursorPos(&mut point).is_ok()
                         && point.x >= rect.left
                         && point.x < rect.right
@@ -330,7 +318,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires an interactive Windows desktop"]
-    fn native_overlay_is_input_opaque_nonactivating_and_removed_when_hidden() {
+    fn native_overlay_is_input_opaque_nonactivating_when_panel_hidden() {
         struct Windows(Vec<HWND>);
         impl Drop for Windows {
             fn drop(&mut self) {
@@ -405,6 +393,16 @@ mod tests {
                 SendMessageW(hwnd, WM_MOUSEACTIVATE, None, None),
                 LRESULT(MA_NOACTIVATE as isize)
             );
+            let state = Box::into_raw(Box::new(Overlay {
+                rect: RECT {
+                    left: 40,
+                    top: 40,
+                    right: 80,
+                    bottom: 80,
+                },
+                pressed: Pressed::default(),
+            }));
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
             let mut controller = Controller {
                 main,
                 overlays: vec![(
@@ -418,7 +416,11 @@ mod tests {
                 )],
             };
             let _ = ShowWindow(main, SW_HIDE);
-            controller.refresh();
+            let _ = SendMessageW(hwnd, WM_LBUTTONDOWN, None, None);
+            assert!(IsWindowVisible(hwnd).as_bool());
+            assert!(!IsWindowVisible(main).as_bool());
+            assert!((*state).pressed.left);
+            controller.clear();
             assert!(controller.overlays.is_empty());
             assert!(!IsWindow(Some(hwnd)).as_bool());
             windows.0.pop();
