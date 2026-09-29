@@ -738,6 +738,7 @@ fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
@@ -758,6 +759,7 @@ pub fn run() {
             quit_app,
             show_update_panel,
             commands::update::check_for_updates,
+            commands::update::install_update,
             commands::autostart::autostart_get,
             commands::autostart::autostart_set,
             open_aux_panel,

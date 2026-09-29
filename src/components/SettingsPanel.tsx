@@ -110,6 +110,7 @@ export function SettingsPanel({
   onClose,
   onCheckUpdates,
   onIgnoreVersion,
+  onInstallUpdate,
   appVersion,
   updateStatus,
   updateRelease,
@@ -119,6 +120,7 @@ export function SettingsPanel({
   onClose: () => void;
   onCheckUpdates: () => void;
   onIgnoreVersion: () => void;
+  onInstallUpdate: () => void;
   appVersion: string;
   updateStatus: UpdateStatus;
   updateRelease: UpdateCheck["release"];
@@ -324,13 +326,16 @@ export function SettingsPanel({
             {updateStatus === "current" && t("update.current")}
             {updateStatus === "unreleased" && t("update.unreleased")}
             {updateStatus === "available" && updateRelease && (<><strong>{t("update.available")} v{updateRelease.version}</strong><span>{t("update.available.desc")}</span></>)}
-            {updateStatus === "error" && <>检查失败：{updateError}</>}
+            {updateStatus === "installing" && t("update.installing")}
+            {updateStatus === "error" && <>{t("update.failed")}：{updateError}</>}
             {updateStatus === "idle" && t("update.idle")}
           </div>
           <div className="info-actions" style={{ marginTop: 18 }}>
-            {updateStatus === "available" && updateRelease ? (
+            {updateStatus === "installing" ? (
+              <button className="info-button primary" disabled>{t("update.installing")}</button>
+            ) : updateStatus === "available" && updateRelease ? (
               <>
-                <button className="info-button primary" onClick={() => void openUrl(updateRelease.url)}>{t("update.goUpdate")}</button>
+                <button className="info-button primary" onClick={onInstallUpdate}>{t("update.goUpdate")}</button>
                 <button className="info-button" onClick={onIgnoreVersion}>{t("update.ignore")}</button>
               </>
             ) : (

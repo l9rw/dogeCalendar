@@ -385,6 +385,18 @@ function CalendarApp() {
     setShowSettings(false);
   };
 
+  const installUpdate = async () => {
+    if (!updateRelease || updateStatus === "installing") return;
+    setUpdateStatus("installing");
+    setUpdateError("");
+    try {
+      await updateApi.install(updateRelease.version, updatePrefs.includeBeta);
+    } catch (error) {
+      setUpdateStatus("error");
+      setUpdateError(String(error));
+    }
+  };
+
   const openSettings = () => {
     setInfoPanel(null);
     setShowSettings(true);
@@ -518,6 +530,7 @@ function CalendarApp() {
           onClose={() => setShowSettings(false)}
           onCheckUpdates={() => void checkUpdates()}
           onIgnoreVersion={ignoreUpdate}
+          onInstallUpdate={() => void installUpdate()}
           appVersion={appVersion}
           updateStatus={updateStatus}
           updateRelease={updateRelease}

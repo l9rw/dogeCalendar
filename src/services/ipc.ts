@@ -66,6 +66,7 @@ export type UpdateStatus =
   | "current"
   | "unreleased"
   | "available"
+  | "installing"
   | "error";
 
 export const worldTimeApi = {
@@ -103,4 +104,6 @@ export const autostartApi = {
 export const updateApi = {
   check: (includeBeta: boolean) =>
     invoke<UpdateCheck>("check_for_updates", { includeBeta }),
+  install: (version: string, includeBeta: boolean) =>
+    invoke<void>("install_update", { version, includeBeta }),
 };

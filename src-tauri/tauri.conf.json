@@ -33,6 +33,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "macOS": {
       "signingIdentity": "-"
@@ -44,5 +45,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU5MjYxQjI2ODVBQUI2NzUKUldSMXRxcUZKaHNtV2RmbVhWb2FtdGQ4cDFtd0RnWThHNnhzV20wR3h4UC8wd21qQldGazdhYjcK",
+      "endpoints": ["https://github.com/l9rw/dogeCalendar/releases/latest/download/latest.json"]
+    }
   }
 }
