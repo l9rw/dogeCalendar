@@ -49,7 +49,7 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     Graphics::Gdi::ScreenToClient,
     UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
+        CallNextHookEx, DispatchMessageW, GetAncestor, GetClassNameW, GetCursorPos, GetMessageW, GetParent,
         SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT,
         HC_ACTION, MSG, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     },
@@ -871,6 +871,12 @@ pub fn run() {
                     }
                 });
                 start_mouse_hook(app.handle().clone());
+                let mut cursor = POINT::default();
+                if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                    show_calendar_at(app.handle(), cursor.x, cursor.y);
+                } else {
+                    show_calendar_at(app.handle(), 0, 0);
+                }
             }
 
             let handle = app.handle().clone();
