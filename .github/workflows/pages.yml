@@ -30,6 +30,21 @@ jobs:
           mkdir site
           cp -R public/. site/
           mv site/landing.html site/index.html
+      - name: Add Google Search Console verification
+        if: ${{ vars.GOOGLE_SITE_VERIFICATION != '' }}
+        env:
+          GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const token = process.env.GOOGLE_SITE_VERIFICATION;
+          if (!/^[A-Za-z0-9_-]+$/.test(token)) {
+            throw new Error('GOOGLE_SITE_VERIFICATION must contain only the Google HTML tag content value.');
+          }
+          const path = 'site/index.html';
+          const html = readFileSync(path, 'utf8');
+          writeFileSync(path, html.replace('</head>', `    <meta name="google-site-verification" content="${token}" />\n  </head>`));
+          NODE
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
