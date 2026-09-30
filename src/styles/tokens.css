@@ -69,11 +69,13 @@ button { font: inherit; }
   min-height: 100vh;
   margin: 0 auto;
   padding: 16px;
+  user-select: none;
   background: var(--shell-bg, var(--surface));
   border: 1px solid var(--shell-border);
   border-radius: 16px;
   box-shadow: var(--shadow);
 }
+.calendar-shell input, .calendar-shell textarea { user-select: text; }
 .aux-shell { position: relative; width: 100%; height: 100vh; overflow-y: auto; border: 1px solid var(--shell-border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-panel); }
 .aux-shell.detail-panel { padding: 18px 18px 20px; }
 .aux-shell.clock-panel { padding: 24px 18px; }
