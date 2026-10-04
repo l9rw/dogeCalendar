@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { startVisibleClock } from "./services/visibleClock";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { fetchHolidayYear, getCalendarMeta, dateKey, type HolidayYear } from "./services/calendarData";
+import { fetchHolidayYear, getCalendarMeta, dateKey, getCachedHolidayYears, cancelHolidayRequests, getHolidayCountdown, type HolidayYear } from "./services/calendarData";
 import type { Huangli } from "./services/huangli";
 import { useInfoStore } from "./stores/infoStore";
 import {
   useSettingsStore,
+  syncRuntimePreferences,
   effectiveAppearance,
   resolveLanguage,
   type Theme,
@@ -18,6 +21,8 @@ import { updateApi } from "./services/ipc";
 import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { StorageNotice } from "./components/StorageNotice";
+import { parseCivilDate, daysRemainingInYear } from "./services/dateTools";
 
 type CalendarDay = {
   date: Date;
@@ -36,6 +41,30 @@ type CalendarDay = {
 type CalendarView = "month" | "year";
 const IGNORED_UPDATE_KEY = "calendar-ignored-update";
 const REPOSITORY_URL = "https://github.com/l9rw/dogeCalendar";
+
+function useVisibleToday() {
+  const [today, setToday] = useState(() => dateKey(new Date()));
+  useEffect(() => {
+    let timer: number | undefined;
+    const refresh = () => {
+      window.clearTimeout(timer);
+      if (document.hidden) return;
+      const now = new Date();
+      setToday(dateKey(now));
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      timer = window.setTimeout(refresh, midnight.getTime() - now.getTime() + 50);
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+  return today;
+}
 
 function useAppearanceEffect() {
   const theme = useSettingsStore((state) => state.theme);
@@ -132,24 +161,36 @@ function buildMonth(
 
 function CurrentDateTime() {
   const language = useSettingsStore((state) => state.language);
-  const { t } = useMemo(() => translator(language), [language]);
+  const { t, inChinese } = useMemo(() => translator(language), [language]);
   const [current, setCurrent] = useState(() => new Date());
 
   useEffect(() => {
-    let timer: number | undefined;
-    const tick = () => {
-      setCurrent(new Date());
-      timer = window.setTimeout(tick, 1000 - (Date.now() % 1000));
-    };
-    const onVisibility = () => {
-      window.clearTimeout(timer);
-      if (!document.hidden) tick();
-    };
-    if (!document.hidden) timer = window.setTimeout(tick, 1000 - (Date.now() % 1000));
-    document.addEventListener("visibilitychange", onVisibility);
+    const nativeWindow = "__TAURI_INTERNALS__" in window ? getCurrentWindow() : null;
+    const clock = startVisibleClock({
+      // AppKit can show the panel without updating WKWebView document.hidden.
+      isVisible: () => nativeWindow ? nativeWindow.isVisible() : !document.hidden,
+      update: setCurrent,
+      schedule: (callback, delay) => window.setTimeout(callback, delay),
+      cancel: (timer) => window.clearTimeout(timer),
+      onError: console.error,
+    });
+    const refresh = () => { void clock.refresh(); };
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    if (nativeWindow) {
+      void nativeWindow.onFocusChanged(refresh).then((dispose) => {
+        if (disposed) dispose();
+        else { unlisten = dispose; refresh(); }
+      }).catch(console.error);
+    }
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
     return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
+      disposed = true;
+      clock.dispose();
+      unlisten?.();
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
     };
   }, []);
 
@@ -162,7 +203,7 @@ function CurrentDateTime() {
     <section className="current-datetime" aria-label={t("today")}>
       <div className="current-date">
         <span>{t("today")} · {weekday}</span>
-        <strong>{current.getFullYear()}年{current.getMonth() + 1}月{current.getDate()}日</strong>
+        <strong>{current.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" })}</strong>
       </div>
       <time className="current-time" dateTime={`${dateKey(current)}T${time}`}>{time}</time>
     </section>
@@ -170,31 +211,32 @@ function CurrentDateTime() {
 }
 
 function parseDetailDate(value: string | null) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
-  const date = new Date(`${value}T12:00:00`);
-  return Number.isNaN(date.getTime()) || dateKey(date) !== value ? new Date() : date;
+  return (value ? parseCivilDate(value) : null) ?? new Date();
 }
 
 function DetailPanel() {
+  const today = useVisibleToday();
   const language = useSettingsStore((state) => state.language);
-  const { t } = useMemo(() => translator(language), [language]);
+  const modules = useSettingsStore((state) => state.modules);
+  const { t, inChinese } = useMemo(() => translator(language), [language]);
   const [selected, setSelected] = useState(() => {
     const date = new URLSearchParams(window.location.search).get("date");
     return parseDetailDate(date);
   });
   const [showHuangliDetails, setShowHuangliDetails] = useState(false);
   const [calculateHuangli, setCalculateHuangli] = useState<((date: Date) => Huangli) | null>(null);
-  const huangli = useMemo(() => calculateHuangli?.(selected) ?? null, [calculateHuangli, selected]);
+  const huangli = useMemo(() => modules.almanac ? calculateHuangli?.(selected) ?? null : null, [calculateHuangli, selected, modules.almanac]);
   const hasHuangliDetails = !!(huangli?.zhushen || huangli?.taishen || huangli?.pengsheng);
   const selectedMeta = getCalendarMeta(selected);
 
   useEffect(() => {
+    if (!modules.almanac) return;
     let active = true;
     void import("./services/huangli").then(({ getHuangli }) => {
       if (active) setCalculateHuangli(() => getHuangli);
     });
     return () => { active = false; };
-  }, []);
+  }, [modules.almanac]);
 
   useEffect(() => {
     let disposed = false;
@@ -213,30 +255,30 @@ function DetailPanel() {
       <div className="detail-topline">
         <img className="detail-mascot" src="/icon.png" alt="Doge" />
         <span className="detail-title">dogeCalendar</span>
-        {selected.toDateString() === new Date().toDateString() && <span className="today-badge">{t("today")}</span>}
+        {dateKey(selected) === today && <span className="today-badge">{t("today")}</span>}
       </div>
       <div className="detail-date">
         <span className="detail-day">{selected.getDate()}</span>
         <div>
-          <strong>{selected.getFullYear()}年{selected.getMonth() + 1}月</strong>
+          <strong>{selected.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { year: "numeric", month: "long" })}</strong>
           <span>{t(`weekday.full.${weekdayKeys()[selected.getDay()]}`)}</span>
         </div>
       </div>
       <div className="detail-lunar"><span>{selectedMeta.lunar}</span><span>{t("lunar")}</span></div>
-      <WeatherCard />
-      <div className="detail-divider" />
+      {modules.weather && <WeatherCard />}
+      {modules.almanac && <><div className="detail-divider" />
       <div className="detail-almanac">
-        <div className="detail-section"><span className="section-label">宜</span><p>{huangli ? huangli.yi.join(" · ") : "计算中…"}</p></div>
-        <div className="detail-section detail-section-muted"><span className="section-label">忌</span><p>{huangli ? huangli.ji.join(" · ") : "计算中…"}</p></div>
+        <div className="detail-section"><span className="section-label">{t("almanac.yi")}</span><p>{huangli ? huangli.yi.join(" · ") : t("almanac.loading")}</p></div>
+        <div className="detail-section detail-section-muted"><span className="section-label">{t("almanac.ji")}</span><p>{huangli ? huangli.ji.join(" · ") : t("almanac.loading")}</p></div>
       </div>
       <div className="huangli-meta">
-        {huangli?.ganzhi && <span><i>干支</i>{huangli.ganzhi}</span>}
-        {huangli?.shengxiao && <span className="huangli-zodiac"><i>生肖</i>{huangli.shengxiao}{hasHuangliDetails && (
+        {huangli?.ganzhi && <span><i>{t("almanac.ganzhi")}</i>{huangli.ganzhi}</span>}
+        {huangli?.shengxiao && <span className="huangli-zodiac"><i>{t("almanac.zodiac")}</i>{huangli.shengxiao}{hasHuangliDetails && (
           <button
             className="huangli-details-toggle"
             type="button"
-            aria-label={showHuangliDetails ? "折叠神胎详情" : "展开神胎详情"}
-            title={showHuangliDetails ? "折叠神胎详情" : "展开神胎详情"}
+            aria-label={t("almanac.details")}
+            title={t("almanac.details")}
             aria-expanded={showHuangliDetails}
             aria-controls="huangli-details"
             onClick={() => setShowHuangliDetails((value) => !value)}
@@ -246,33 +288,34 @@ function DetailPanel() {
             </svg>
           </button>
         )}</span>}
-        {huangli?.xingzuo && <span><i>星座</i>{huangli.xingzuo}</span>}
-        {huangli?.jieqi && <span><i>节气</i>{huangli.jieqi}</span>}
-        {selectedMeta.holiday && <span><i>节日</i>{selectedMeta.holiday}</span>}
+        {huangli?.xingzuo && <span><i>{t("almanac.constellation")}</i>{huangli.xingzuo}</span>}
+        {huangli?.jieqi && <span><i>{t("almanac.term")}</i>{huangli.jieqi}</span>}
+        {selectedMeta.holiday && <span><i>{t("almanac.festival")}</i>{selectedMeta.holiday}</span>}
       </div>
       {hasHuangliDetails && (
         <div className="side-holiday-card" id="huangli-details" hidden={!showHuangliDetails}>
-          {huangli?.zhushen && <div className="holiday-lines"><p><i className="dark-icon">神</i>值神 · {huangli.zhushen}</p></div>}
-          {huangli?.taishen && <div className="holiday-lines"><p><i className="dark-icon">胎</i>{huangli.taishen}</p></div>}
-          {huangli?.pengsheng && <div className="holiday-lines"><p><i className="red-icon">忌</i>{huangli.pengsheng}</p></div>}
+          {huangli?.zhushen && <div className="holiday-lines"><p>{t("almanac.spirit")} · {huangli.zhushen}</p></div>}
+          {huangli?.taishen && <div className="holiday-lines"><p>{t("almanac.fetal")} · {huangli.taishen}</p></div>}
+          {huangli?.pengsheng && <div className="holiday-lines"><p>{t("almanac.pengzu")} · {huangli.pengsheng}</p></div>}
         </div>
-      )}
+      )}</>}
     </main>
   );
 }
 
 function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
   const { t } = useTranslator();
+  const clocksEnabled = useSettingsStore((state) => state.modules.worldClock);
   useAppearanceEffect();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") invoke("close_aux_panel", { panel });
+      if (event.key === "Escape" && !event.defaultPrevented && !event.isComposing) void invoke("close_aux_panel", { panel }).catch(console.error);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [panel]);
   useEffect(() => {
-    if (panel !== "clock") return;
+    if (panel !== "clock" || !clocksEnabled) return;
     let timer: number | undefined;
     const stop = () => {
       if (timer !== undefined) {
@@ -282,22 +325,27 @@ function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
     };
     const start = () => {
       if (timer === undefined && !document.hidden) {
-        timer = window.setInterval(() => void useInfoStore.getState().loadClocks(), 15000);
+        timer = window.setInterval(() => void useInfoStore.getState().loadClocks().catch(console.error), 60000);
       }
     };
     const onVisibility = () => (document.hidden ? stop() : start());
+    const refresh = () => { if (!document.hidden) void useInfoStore.getState().loadClocks().catch(console.error); };
     start();
     document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
     return () => {
       stop();
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
     };
-  }, [panel]);
+  }, [panel, clocksEnabled]);
   if (panel === "detail") return <DetailPanel />;
   return (
     <main className="aux-shell clock-panel" aria-label={t("worldTime")}>
       <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel })} aria-label={t("settings.close")}>×</button>
-      <WorldClockStrip />
+      {clocksEnabled ? <WorldClockStrip /> : <p className="settings-description">{t("modules.disabled")}</p>}
     </main>
   );
 }
@@ -309,13 +357,15 @@ export function App() {
 }
 
 function CalendarApp() {
+  const today = useVisibleToday();
   const isMac = document.documentElement.dataset.platform === "macos";
   const now = new Date();
-  const { t } = useTranslator();
+  const { t, inChinese } = useTranslator();
   const theme = useSettingsStore((state) => state.theme);
   const calendar = useSettingsStore((state) => state.calendar);
   const updatePrefs = useSettingsStore((state) => state.update);
-  const [cursor, setCursor] = useState(new Date(2026, 8, 1));
+  const modules = useSettingsStore((state) => state.modules);
+  const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
   const [showSettings, setShowSettings] = useState(false);
@@ -326,43 +376,62 @@ function CalendarApp() {
   const [updateRelease, setUpdateRelease] = useState<UpdateCheck["release"]>(null);
   const [updateError, setUpdateError] = useState("");
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
-  const [holidayYears, setHolidayYears] = useState<Record<number, HolidayYear>>({});
+  const [showDateJump, setShowDateJump] = useState(false);
+  const [jumpInput, setJumpInput] = useState(() => dateKey(new Date()));
+  const [jumpError, setJumpError] = useState("");
+  const [holidayYears, setHolidayYears] = useState<Record<number, HolidayYear>>(getCachedHolidayYears);
   const wheelGesture = useRef({ lastEvent: -Infinity, delta: 0, handled: false });
   useAppearanceEffect();
   const days = useMemo(
     () => buildMonth(cursor.getFullYear(), cursor.getMonth(), holidayYears, calendar.weekStart, calendar.showWeekNumbers),
-    [cursor, holidayYears, calendar.weekStart, calendar.showWeekNumbers],
+    [cursor, holidayYears, calendar.weekStart, calendar.showWeekNumbers, today],
   );
 
   const cursorYear = cursor.getFullYear();
   useEffect(() => {
-    if (holidayYears[cursorYear]) return;
+    if (!modules.network || !calendar.showHolidays) cancelHolidayRequests();
+  }, [modules.network, calendar.showHolidays]);
+  useEffect(() => {
+    if (!calendar.showHolidays) return;
     let active = true;
-    void fetchHolidayYear(cursorYear).then((data) => {
-      if (active && data) setHolidayYears((current) => ({ ...current, [cursorYear]: data }));
-    });
-    return () => { active = false; };
-  }, [cursorYear, holidayYears]);
+    const refresh = () => {
+      if (document.hidden) return;
+      const visibleYears = Array.from(new Set([Number(today.slice(0, 4)), Number(today.slice(0, 4)) + 1, ...(view === "year" ? [cursorYear] : days.map((day) => day.date.getFullYear()))]));
+      void Promise.all(visibleYears.map(async (year) => {
+        const data = await fetchHolidayYear(year, modules.network);
+        if (active) setHolidayYears((current) => data ? { ...current, [year]: data } : { ...current });
+      }));
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    return () => { active = false; document.removeEventListener("visibilitychange", refresh); };
+   }, [cursorYear, cursor.getMonth(), view, calendar.showHolidays, modules.network, today]);
 
   useEffect(() => {
     void getVersion().then(setAppVersion).catch(console.error);
     let active = true;
-    if (!updatePrefs.autoCheck) return;
-    void updateApi.check(updatePrefs.includeBeta).then(async ({ release, currentVersion }) => {
+    if (!updatePrefs.autoCheck || !modules.network) return;
+    void syncRuntimePreferences().then(() => updateApi.check(updatePrefs.includeBeta)).then(({ release, currentVersion }) => {
+      if (!useSettingsStore.getState().modules.network) return;
       if (active) setAppVersion(currentVersion);
       if (!active || !release || localStorage.getItem(IGNORED_UPDATE_KEY) === release.version) return;
       setUpdateRelease(release);
       setUpdateStatus("available");
-      setInfoPanel(null);
-      setShowSettings(true);
-      setSettingsView("update");
-      await invoke("show_update_panel");
     }).catch((error) => console.error("启动时检查更新失败", error));
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUpdates = async () => {
+    setShowToolbarMenu(false);
+    setInfoPanel(null);
+    if (!useSettingsStore.getState().modules.network) {
+      setUpdateError(t("modules.offline"));
+      setUpdateStatus("error");
+      setShowSettings(true);
+      setSettingsView("update");
+      return;
+    }
     setShowToolbarMenu(false);
     setInfoPanel(null);
     setShowSettings(true);
@@ -386,7 +455,7 @@ function CalendarApp() {
   };
 
   const installUpdate = async () => {
-    if (!updateRelease || updateStatus === "installing") return;
+    if (!updateRelease || updateStatus === "installing" || !modules.network) return;
     setUpdateStatus("installing");
     setUpdateError("");
     try {
@@ -410,26 +479,61 @@ function CalendarApp() {
   };
 
   const moveMonth = (offset: number) => {
-    setCursor((value) => new Date(value.getFullYear(), value.getMonth() + offset, 1));
+    setCursor((value) => {
+      const next = new Date(value.getFullYear(), value.getMonth() + offset, 1);
+      return next.getFullYear() >= 1900 && next.getFullYear() <= 2100 ? next : value;
+    });
   };
 
   const moveYear = (offset: number) => {
-    setCursor((value) => new Date(value.getFullYear() + offset, value.getMonth(), 1));
+    setCursor((value) => new Date(Math.max(1900, Math.min(2100, value.getFullYear() + offset)), value.getMonth(), 1));
   };
 
   const selectDate = (date: Date) => {
+    if (date.getFullYear() < 1900 || date.getFullYear() > 2100) return;
     setSelected(date);
     setCursor((current) => current.getFullYear() === date.getFullYear() && current.getMonth() === date.getMonth()
       ? current : new Date(date.getFullYear(), date.getMonth(), 1));
     void invoke("open_aux_panel", { panel: "detail", date: dateKey(date) });
   };
 
+  const jumpToDate = (event: React.FormEvent) => {
+    event.preventDefault();
+    const date = parseCivilDate(jumpInput);
+    if (!date) { setJumpError(t("calendar.invalidDate")); return; }
+    setView("month");
+    selectDate(date);
+    setShowDateJump(false);
+    setJumpError("");
+  };
+
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      event.preventDefault();
+      if (showToolbarMenu) setShowToolbarMenu(false);
+      else if (showDateJump) setShowDateJump(false);
+      else if (showSettings) setShowSettings(false);
+      else if (infoPanel) setInfoPanel(null);
+      else if ("__TAURI_INTERNALS__" in window) void invoke("hide_calendar").catch(console.error);
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [showToolbarMenu, showDateJump, showSettings, infoPanel]);
+
   useEffect(() => {
     if (!calendar.keyboardShortcut) return;
     const onKey = (event: KeyboardEvent) => {
-      if (showSettings || infoPanel) return;
+    if (showSettings || infoPanel || showDateJump) return;
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        setShowDateJump(true);
+        setShowToolbarMenu(false);
+        return;
+      }
+      if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || target?.isContentEditable || target?.closest("input, select, textarea, [role='dialog']")) return;
+      if (event.key === " " && target?.closest("button, summary, a")) return;
       switch (event.key) {
         case "ArrowLeft": event.preventDefault(); moveMonth(-1); break;
         case "ArrowRight": event.preventDefault(); moveMonth(1); break;
@@ -442,7 +546,7 @@ function CalendarApp() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendar.keyboardShortcut, showSettings, infoPanel]);
+  }, [calendar.keyboardShortcut, showSettings, infoPanel, showDateJump]);
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
     if (isMac) {
@@ -461,17 +565,17 @@ function CalendarApp() {
       }
       return;
     }
-    if (Math.abs(event.deltaY) >= 8) moveMonth(event.deltaY < 0 ? -1 : 1);
+    if (!event.ctrlKey && Math.abs(event.deltaY) > Math.abs(event.deltaX) && Math.abs(event.deltaY) >= 8) moveMonth(event.deltaY < 0 ? -1 : 1);
   };
 
   const selectedKey = selected.toDateString();
 
   useEffect(() => {
     const listeners = [
-      listen("taskbar-calendar-click", () => {
+       listen("taskbar-calendar-click", () => {
        setShowSettings(false);
        setInfoPanel(null);
-       }),
+        }),
       listen("open-settings", () => {
       openSettings();
       }),
@@ -509,6 +613,12 @@ function CalendarApp() {
   const weekdayOrder = orderedWeekdays(calendar.weekStart);
   const showLunar = calendar.showLunar;
   const showHolidays = calendar.showHolidays;
+  const holidayCountdown = showHolidays ? getHolidayCountdown(parseDetailDate(today), holidayYears) : null;
+  const holidaySummary = holidayCountdown
+    ? t(holidayCountdown.kind === "current" ? "calendar.holidayRemaining" : "calendar.holidayCountdown")
+      .replace("{name}", holidayCountdown.name).replace("{days}", String(holidayCountdown.days))
+    : t("calendar.holidayPending");
+  const yearSummary = t("calendar.yearRemaining").replace("{days}", String(daysRemainingInYear(parseDetailDate(today))));
 
   return (
     <main className="calendar-shell">
@@ -537,20 +647,20 @@ function CalendarApp() {
           updateError={updateError}
           initialView={settingsView}
         />
-      ) : <><CurrentDateTime /><div className="calendar-layout">
+       ) : <><StorageNotice /><CurrentDateTime /><div className="calendar-layout">
         <section className="calendar-area" aria-label={t("settings.calendar")}>
         <header className="calendar-header">
           <div className="month-control">
-            <button aria-label={t("calendar.startWeekOn")} onClick={() => moveMonth(-1)}>‹</button>
+            <button aria-label={t("calendar.previousMonth")} onClick={() => moveMonth(-1)}>‹</button>
             <select
               className="calendar-select"
               aria-label={t("settings.calendar")}
               value={cursor.getMonth()}
               onChange={(event) => setCursor(new Date(cursor.getFullYear(), Number(event.target.value), 1))}
             >
-              {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{month + 1}月</option>)}
+               {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2026, month, 1).toLocaleDateString(inChinese ? "zh-CN" : "en-US", { month: "short" })}</option>)}
             </select>
-            <button aria-label={t("settings.calendar")} onClick={() => moveMonth(1)}>›</button>
+            <button aria-label={t("calendar.nextMonth")} onClick={() => moveMonth(1)}>›</button>
           </div>
           <select
             className="calendar-select calendar-select-year"
@@ -560,7 +670,7 @@ function CalendarApp() {
           >
             {Array.from({ length: 201 }, (_, offset) => {
               const year = 1900 + offset;
-              return <option key={year} value={year}>{year}年</option>;
+               return <option key={year} value={year}>{year}{inChinese ? "年" : ""}</option>;
             })}
           </select>
           <div className="calendar-toolbar">
@@ -598,13 +708,19 @@ function CalendarApp() {
                   onClick={() => setShowToolbarMenu(false)}
                 />
                 <div className="toolbar-menu" role="menu">
-                  <button
+                  {modules.worldClock && <button
                     role="menuitem"
                     className="toolbar-menu-item"
                     onClick={() => { void invoke("open_aux_panel", { panel: "clock" }); setShowToolbarMenu(false); }}
                   >
                     <span className="toolbar-menu-check" />
                     <span>{t("menu.worldClock")}</span>
+                  </button>}
+                  <button role="menuitem" className="toolbar-menu-item" onClick={() => { setView(view === "month" ? "year" : "month"); setShowToolbarMenu(false); }}>
+                    <span className="toolbar-menu-check" /><span>{t(view === "month" ? "calendar.yearView" : "calendar.monthView")}</span>
+                  </button>
+                  <button role="menuitem" className="toolbar-menu-item" onClick={() => { setShowDateJump(true); setShowToolbarMenu(false); }}>
+                    <span className="toolbar-menu-check" /><span>{t("calendar.jump")}</span>
                   </button>
                   {isMac && <button
                     role="menuitem"
@@ -618,7 +734,7 @@ function CalendarApp() {
                     <span className="toolbar-menu-check" /><span>{t("menu.settings")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => void checkUpdates()}>
-                    <span className="toolbar-menu-check" /><span>{t("menu.onlineUpdate")}</span>
+                    <span className="toolbar-menu-check">{updateStatus === "available" ? "•" : ""}</span><span>{t("menu.onlineUpdate")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={showAbout}>
                     <span className="toolbar-menu-check" /><span>{t("menu.about")}</span>
@@ -630,6 +746,13 @@ function CalendarApp() {
         </header>
 
         <div className="calendar-body">
+        {showDateJump && <form className="popover date-jump" role="dialog" aria-label={t("calendar.jump")} onSubmit={jumpToDate} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setShowDateJump(false); } }}>
+          <button type="button" className="popover-close" aria-label={t("settings.close")} onClick={() => setShowDateJump(false)}>×</button>
+          <label htmlFor="jump-date">{t("calendar.jump")}</label>
+          <input id="jump-date" type="date" min="1900-01-01" max="2100-12-31" className="settings-select" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} autoFocus required />
+          <button className="info-button" type="submit">{t("calendar.go")}</button>
+          {jumpError && <span className="date-format-error" role="alert">{jumpError}</span>}
+        </form>}
         {view === "month" ? (
           <div className="calendar-card" onWheel={handleCalendarWheel}>
             <div className="weekday-row">
@@ -645,32 +768,40 @@ function CalendarApp() {
                 return (
                   <button
                     className={`day-cell ${day.isCurrentMonth ? "" : "muted"} ${day.isWeekend ? "weekend" : ""} ${selectedDay ? "selected" : ""} ${day.isToday ? "today" : ""} ${showHolidays && day.isRest ? "holiday-cell" : ""} ${showHolidays && day.isWorkday ? "workday-cell" : ""}`}
-                    key={day.date.toISOString()}
+                     key={day.date.toISOString()}
+                     aria-label={`${day.date.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}${showHolidays && day.isWorkday ? ` ${t("calendar.work")}` : ""}${showHolidays && day.isRest ? ` ${t("calendar.rest")}` : ""}`}
                     onClick={() => selectDate(day.date)}
                     aria-current={day.isToday ? "date" : undefined}
                   >
                     {day.weekNumber !== undefined && <b className="week-mark">{t("week")}{day.weekNumber}</b>}
-                    <span className="solar-day">{day.date.getDate()}{showHolidays && day.isWorkday && <b className="work-mark">班</b>}</span>
+                     <span className="solar-day">{day.date.getDate()}{showHolidays && day.isWorkday && <b className="work-mark">{t("calendar.work")}</b>}</span>
                     <span className={`lunar-day ${showHolidays && (day.holiday || day.label) ? "special-day" : ""}`}>
-                      {showLunar ? (showHolidays ? (day.holiday ?? day.label ?? day.lunarLabel) : (day.label ?? day.lunarLabel)) : ""}
+                       {(showHolidays ? day.holiday : undefined) ?? (showLunar ? day.label ?? day.lunarLabel : "")}
                     </span>
-                    {showHolidays && day.isRest && <b className="rest-mark">休</b>}
+                     {showHolidays && day.isRest && <b className="rest-mark">{t("calendar.rest")}</b>}
                   </button>
                 );
               })}
             </div>
           </div>
         ) : (
-          <div className="year-grid" aria-label={`${cursor.getFullYear()}年全年视图`}>
+          <div className="year-grid" aria-label={`${cursor.getFullYear()} ${t("calendar.yearView")}`}>
              {Array.from({ length: 12 }, (_, month) => (
               <section className="mini-month" key={month}>
-                <button className="mini-month-title" onClick={() => { setCursor(new Date(cursor.getFullYear(), month, 1)); setView("month"); }}>{month + 1}月</button>
+                <button className="mini-month-title" onClick={() => { setCursor(new Date(cursor.getFullYear(), month, 1)); setView("month"); }}>{new Date(cursor.getFullYear(), month, 1).toLocaleDateString(inChinese ? "zh-CN" : "en-US", { month: "short" })}</button>
                 <div className="mini-weekdays">{weekdayOrder.map((dayIndex) => <span key={dayIndex}>{t(`weekday.${weekdayKeys()[dayIndex]}`)}</span>)}</div>
-                 <div className="mini-month-grid">{buildMonth(cursor.getFullYear(), month, holidayYears, calendar.weekStart, false).map((day) => <button key={day.date.toISOString()} className={`${day.isCurrentMonth ? "" : "muted"} ${day.isToday ? "today" : ""}`} onClick={() => selectDate(day.date)}>{day.date.getDate()}</button>)}</div>
+                  <div className="mini-month-grid">{buildMonth(cursor.getFullYear(), month, holidayYears, calendar.weekStart, false).map((day) => <button key={day.date.toISOString()} className={`${day.isCurrentMonth ? "" : "muted"} ${day.isToday ? "today" : ""} ${showHolidays && day.isRest ? "holiday-cell" : ""} ${showHolidays && day.isWorkday ? "workday-cell" : ""}`} aria-label={day.date.toLocaleDateString(inChinese ? "zh-CN" : "en-US")} title={`${dateKey(day.date)} ${day.holiday ?? ""} ${day.isRest ? t("calendar.restDay") : day.isWorkday ? t("calendar.workDay") : ""}`} onClick={() => { setView("month"); selectDate(day.date); }}>{day.date.getDate()}</button>)}</div>
               </section>
             ))}
           </div>
         )}
+        {view === "year" && <p className="calendar-data-note">{t("calendar.yearLegend")}</p>}
+         <div className="calendar-countdown-summary" role="status">
+           {showHolidays && (holidayCountdown
+             ? <button className="calendar-countdown-holiday" onClick={() => selectDate(parseDetailDate(holidayCountdown.date))} title={`${holidaySummary} · ${holidayCountdown.date}${holidayCountdown.kind === "current" ? ` · ${t("calendar.remainingIncludesToday")}` : ""}`}>{holidaySummary}</button>
+             : <span>{holidaySummary}</span>)}
+           <span title={t("calendar.remainingExcludesToday")}>{yearSummary}</span>
+         </div>
         </div>
         </section>
       </div>

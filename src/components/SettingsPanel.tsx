@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, syncRuntimePreferences } from "../stores/settingsStore";
 import { useInfoStore } from "../stores/infoStore";
 import { translator, type Language } from "../data/i18n";
 import {
@@ -12,10 +12,11 @@ import {
   colorName,
   type ColorInfo,
 } from "../data/colors";
-import { autostartApi, type UpdateStatus, type UpdateCheck } from "../services/ipc";
+import { autostartApi, locationApi, type LocationCandidate, type UpdateStatus, type UpdateCheck } from "../services/ipc";
+import { StorageNotice } from "./StorageNotice";
 
 type MenuBarStyle = "calendar" | "date" | "weekday_date";
-type View = "menu" | "appearance" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update";
+type View = "menu" | "appearance" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update" | "modules";
 
 const DATE_TEMPLATES = [
   ["yyyy/M/d", "简洁", "2026/9/28"],
@@ -128,11 +129,27 @@ export function SettingsPanel({
   initialView?: "menu" | "update";
 }) {
   const isMac = document.documentElement.dataset.platform === "macos";
+  const isWindows = document.documentElement.dataset.platform === "windows";
   const store = useSettingsStore();
   const { t, inChinese } = useMemo(() => translator(store.language), [store.language]);
   const [view, setView] = useState<View>(initialView ?? "menu");
+  useEffect(() => { setView(initialView ?? "menu"); }, [initialView]);
   const [appVer, setAppVer] = useState(appVersion);
   const [glassAvailable, setGlassAvailable] = useState(() => document.documentElement.dataset.nativeGlass === "true");
+  const [fallbackTray, setFallbackTray] = useState(true);
+  const [clockTakeover, setClockTakeover] = useState(true);
+  const [entryBusy, setEntryBusy] = useState(false);
+  const [trayError, setTrayError] = useState("");
+  const [globalShortcut, setGlobalShortcut] = useState<{ enabled: boolean; shortcut: string; error?: string | null } | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    void invoke<{ enabled: boolean; shortcut: string; error?: string | null }>("global_shortcut_get").then(setGlobalShortcut).catch((error) => setShortcutError(String(error)));
+  }, []);
+  useEffect(() => {
+    if (isWindows) void invoke<boolean>("fallback_tray_get").then(setFallbackTray).catch((error) => setTrayError(String(error)));
+    if (isWindows) void invoke<boolean>("taskbar_clock_takeover_get").then(setClockTakeover).catch((error) => setTrayError(String(error)));
+  }, [isWindows]);
 
   useEffect(() => {
     if (isMac) void invoke<boolean>("macos_glass_enabled").then(setGlassAvailable).catch(console.error);
@@ -163,17 +180,19 @@ export function SettingsPanel({
   ];
 
   const [launchBusy, setLaunchBusy] = useState(false);
+  const [launchError, setLaunchError] = useState("");
   useEffect(() => {
     void autostartApi.get().then((enabled) => store.hydrateLaunchAtLogin(enabled)).catch(() => store.hydrateLaunchAtLogin(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const toggleLaunch = async () => {
     setLaunchBusy(true);
+    setLaunchError("");
     try {
       const next = await autostartApi.set(!store.launchAtLogin);
       store.hydrateLaunchAtLogin(next);
     } catch (error) {
-      console.error("开机启动设置失败", error);
+      setLaunchError(String(error));
       store.hydrateLaunchAtLogin(await autostartApi.get().catch(() => false));
     } finally {
       setLaunchBusy(false);
@@ -198,15 +217,17 @@ export function SettingsPanel({
 
       {view === "menu" ? (
         <nav className="settings-nav">
+          <StorageNotice />
           <NavRow label={t("settings.appearance")} value={t(`theme.${store.theme === "system" ? "system" : store.theme}`)} onClick={() => setView("appearance")} />
           <NavRow label={t("settings.calendar")} onClick={() => setView("calendar")} />
+          <NavRow label={t("settings.modules")} onClick={() => setView("modules")} />
           <NavRow
             label={t("settings.language")}
             value={store.language === "system" ? t("language.system") : store.language === "zh_CN" ? t("language.zh_CN") : t("language.en_US")}
             onClick={() => setView("language")}
           />
           {isMac && <NavRow label={t("settings.menubarStyle")} onClick={() => setView("menubar")} />}
-          {!isMac && <NavRow label={t("settings.taskbarDate")} onClick={() => setView("taskbarDate")} />}
+          {isWindows && <NavRow label={t("settings.taskbarDate")} onClick={() => setView("taskbarDate")} />}
           <NavRow label={t("settings.locationWeather")} onClick={() => setView("location")} />
           <div className="settings-nav-row">
             <span className="nav-label">{t("settings.launchAtLogin")}</span>
@@ -220,6 +241,7 @@ export function SettingsPanel({
               onClick={() => void toggleLaunch()}
             />
           </div>
+          {launchError && <p className="date-format-error" role="alert">{launchError}</p>}
         </nav>
       ) : view === "appearance" ? (
         <>
@@ -290,8 +312,34 @@ export function SettingsPanel({
           <Toggle label={t("calendar.showLunar")} checked={store.calendar.showLunar} onChange={(value) => store.setCalendarPref("showLunar", value)} />
           <Toggle label={t("calendar.showHolidays")} checked={store.calendar.showHolidays} onChange={(value) => store.setCalendarPref("showHolidays", value)} />
           <Toggle label={t("calendar.showWeekNumbers")} checked={store.calendar.showWeekNumbers} onChange={(value) => store.setCalendarPref("showWeekNumbers", value)} />
-          <Toggle label={t("calendar.showEvents")} checked={store.calendar.showEvents} onChange={(value) => store.setCalendarPref("showEvents", value)} disabled />
           <Toggle label={t("calendar.keyboardShortcut")} checked={store.calendar.keyboardShortcut} onChange={(value) => store.setCalendarPref("keyboardShortcut", value)} />
+          {globalShortcut && <Toggle label={t("calendar.globalShortcut")} checked={globalShortcut.enabled} onChange={(enabled) => {
+            void invoke<{ enabled: boolean; shortcut: string; error?: string | null }>("global_shortcut_set", { enabled }).then((result) => { setGlobalShortcut(result); setShortcutError(""); }).catch((error) => setShortcutError(String(error)));
+          }} />}
+          <p className="settings-description">{t("calendar.globalShortcutHint")}</p>
+          {(shortcutError || globalShortcut?.error) && <p className="date-format-error" role="alert">{shortcutError || globalShortcut?.error}</p>}
+        </>
+      ) : view === "modules" ? (
+        <>
+          <BackRow onBack={back} />
+          <p className="settings-description">{t("modules.lightweight")}</p>
+          <Toggle label={t("modules.weather")} checked={store.modules.weather} onChange={(value) => store.setModulePref("weather", value)} />
+          <Toggle label={t("modules.worldClock")} checked={store.modules.worldClock} onChange={(value) => store.setModulePref("worldClock", value)} />
+          <Toggle label={t("modules.almanac")} checked={store.modules.almanac} onChange={(value) => store.setModulePref("almanac", value)} />
+          <Toggle label={t("modules.network")} checked={store.modules.network} onChange={(value) => store.setModulePref("network", value)} />
+          <p className="settings-description">{t("modules.privacy")}</p>
+          {isWindows && <>
+            <Toggle label={t("modules.clockTakeover")} checked={clockTakeover} disabled={entryBusy} onChange={(enabled) => {
+              setEntryBusy(true);
+              void invoke<boolean>("taskbar_clock_takeover_set", { enabled }).then((value) => { setClockTakeover(value); setTrayError(""); }).catch((error) => setTrayError(String(error))).finally(() => setEntryBusy(false));
+            }} />
+            <Toggle label={t("modules.fallbackTray")} checked={fallbackTray} disabled={entryBusy} onChange={(enabled) => {
+              setEntryBusy(true);
+              void invoke<boolean>("fallback_tray_set", { enabled }).then((value) => { setFallbackTray(value); setTrayError(""); }).catch((error) => setTrayError(String(error))).finally(() => setEntryBusy(false));
+            }} />
+            <p className="settings-description">{t("modules.entryHint")}</p>
+          </>}
+          {trayError && <p className="date-format-error" role="alert">{trayError}</p>}
         </>
       ) : view === "language" ? (
         <>
@@ -335,11 +383,11 @@ export function SettingsPanel({
               <button className="info-button primary" disabled>{t("update.installing")}</button>
             ) : updateStatus === "available" && updateRelease ? (
               <>
-                <button className="info-button primary" onClick={onInstallUpdate}>{t("update.goUpdate")}</button>
+                <button className="info-button primary" disabled={!store.modules.network} onClick={onInstallUpdate}>{t("update.goUpdate")}</button>
                 <button className="info-button" onClick={onIgnoreVersion}>{t("update.ignore")}</button>
               </>
             ) : (
-              <button className="info-button primary" disabled={updateStatus === "checking"} onClick={() => void onCheckUpdates()}>
+              <button className="info-button primary" disabled={updateStatus === "checking" || !store.modules.network} onClick={() => void onCheckUpdates()}>
                 {updateStatus === "checking" ? t("update.checking") : t("update.recheck")}
               </button>
             )}
@@ -351,7 +399,8 @@ export function SettingsPanel({
 }
 
 function BackRow({ onBack }: { onBack: () => void }) {
-  return <button className="settings-back" onClick={onBack} style={{ marginBottom: 14 }}>‹ 返回</button>;
+  const language = useSettingsStore((state) => state.language);
+  return <button className="settings-back" onClick={onBack} style={{ marginBottom: 14 }}>‹ {translator(language).t("settings.back")}</button>;
 }
 
 function matchSystemDark() {
@@ -521,6 +570,14 @@ function TaskbarDateSettings({ onBack, t }: { onBack: () => void; t: (key: strin
 }
 
 function LocationSettings({ onBack, t, onClose }: { onBack: () => void; t: (key: string) => string; onClose: () => void }) {
+  const modules = useSettingsStore((state) => state.modules);
+  const language = useSettingsStore((state) => state.language);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<LocationCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
   const [label, setLabel] = useState("");
@@ -531,30 +588,66 @@ function LocationSettings({ onBack, t, onClose }: { onBack: () => void; t: (key:
   return (
     <>
       <BackRow onBack={onBack} />
-      <p className="settings-description">手动设置坐标会覆盖 IP 定位；清除后会重新使用 IP 兜底。</p>
+      <form className="location-search" onSubmit={async (event) => {
+        event.preventDefault();
+        if (!modules.weather || !modules.network || searching) return;
+        setSearching(true); setError(""); setResults([]); setSearched(false);
+        try {
+          await syncRuntimePreferences();
+          const found = await locationApi.search(query, translator(language).inChinese ? "zh" : "en");
+          if (useSettingsStore.getState().modules.network) { setResults(found); setSearched(true); }
+        } catch (failure) { setError(String(failure)); }
+        finally { setSearching(false); }
+      }}>
+        <label htmlFor="location-search">{t("location.search")}</label>
+        <input id="location-search" className="location-input" value={query} minLength={2} maxLength={100} disabled={searching} onChange={(event) => { setQuery(event.target.value); setResults([]); setSearched(false); }} required />
+        <button className="info-button" disabled={searching || !modules.network || !modules.weather}>{t(searching ? "location.searching" : "location.search")}</button>
+      </form>
+      {modules.network && modules.weather ? <div className="location-search-results">
+        {searched && !results.length && <p className="settings-description">{t("location.noResults")}</p>}
+        {results.map((place) => {
+          const placeLabel = Array.from(new Set([place.name, place.admin1, place.country].filter(Boolean))).join(", ");
+          return <button className="theme-option" key={`${place.latitude},${place.longitude}`} disabled={saving} onClick={async () => {
+            setSaving(true); setError("");
+            try { await setManualLocation(place.latitude, place.longitude, placeLabel.slice(0, 120)); onClose(); }
+            catch (failure) { setError(String(failure)); }
+            finally { setSaving(false); }
+          }}>{placeLabel}</button>;
+        })}
+      </div> : <p className="settings-description">{t(modules.weather ? "modules.offline" : "modules.disabled")}</p>}
+      <p className="settings-description">{t("location.provider")}</p>
+      <details className="location-coordinates"><summary>{t("location.coordinates")}</summary>
+      <p className="settings-description">{t("location.description")}</p>
       <div className="location-form">
-        <input className="location-input" placeholder="纬度" value={lat} onChange={(event) => setLat(event.target.value)} inputMode="decimal" />
-        <input className="location-input" placeholder="经度" value={lon} onChange={(event) => setLon(event.target.value)} inputMode="decimal" />
-        <input className="location-input location-input-wide" placeholder="城市/地点名称" value={label} onChange={(event) => setLabel(event.target.value)} />
+        <input className="location-input" aria-label={t("location.latitude")} placeholder={t("location.latitude")} value={lat} onChange={(event) => setLat(event.target.value)} inputMode="decimal" />
+        <input className="location-input" aria-label={t("location.longitude")} placeholder={t("location.longitude")} value={lon} onChange={(event) => setLon(event.target.value)} inputMode="decimal" />
+        <input className="location-input location-input-wide" aria-label={t("location.label")} placeholder={t("location.label")} value={label} onChange={(event) => setLabel(event.target.value)} maxLength={120} />
         <button
           className="location-apply"
-          onClick={() => {
+          disabled={saving}
+          onClick={async () => {
             const latitude = Number(lat);
             const longitude = Number(lon);
-            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-            void setManualLocation(latitude, longitude, label || "自定义位置");
-            setLat("");
-            setLon("");
-            setLabel("");
-            onClose();
+            if (!lat.trim() || !lon.trim() || !Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+              setError(t("location.invalid"));
+              return;
+            }
+            setSaving(true);
+            try {
+              await setManualLocation(latitude, longitude, label.trim() || t("location.custom"));
+              onClose();
+            } catch (failure) { setError(String(failure)); }
+            finally { setSaving(false); }
           }}
         >
           {t("settings.apply")}
         </button>
       </div>
+      </details>
+      {error && <p className="date-format-error" role="alert">{error}</p>}
       <div className="location-actions">
-        <button className="location-action" onClick={() => void clearLocation()}>清除定位</button>
-        <button className="location-action" onClick={() => void clearWeatherCache()}>清除天气缓存</button>
+        <button className="location-action" onClick={() => void clearLocation().catch((failure) => setError(String(failure)))}>{t("location.clear")}</button>
+        <button className="location-action" onClick={() => void clearWeatherCache().catch((failure) => setError(String(failure)))}>{t("location.clearWeather")}</button>
       </div>
     </>
   );

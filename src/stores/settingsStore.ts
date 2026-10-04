@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_ACCENT,
   DEFAULT_DARK_BACKGROUND,
@@ -6,6 +7,8 @@ import {
 } from "../data/colors";
 import type { Language } from "../data/i18n";
 import { resolveLanguage } from "../data/i18n";
+import { DEFAULT_MODULES, loadModulePreferences, type ModulePrefs } from "../services/modulePreferences";
+export type { ModulePrefs } from "../services/modulePreferences";
 
 export type Theme = "system" | "light" | "dark";
 export type WeekStart = 0 | 1 | 6; // Sunday | Monday | Saturday (JS getDay)
@@ -24,9 +27,6 @@ export type CalendarPrefs = {
   showHolidays: boolean;
   showWeekNumbers: boolean;
   keyboardShortcut: boolean;
-  // Calendar events require native EventKit access that is not available on
-  // every platform; the toggle is preserved as a migrated setting.
-  showEvents: boolean;
 };
 
 export type UpdatePrefs = {
@@ -40,6 +40,7 @@ export type SettingsState = {
   language: Language;
   calendar: CalendarPrefs;
   update: UpdatePrefs;
+  modules: ModulePrefs;
   launchAtLogin: boolean;
   ready: boolean;
 
@@ -50,6 +51,7 @@ export type SettingsState = {
   setLanguage: (language: Language) => void;
   setCalendarPref: <K extends keyof CalendarPrefs>(key: K, value: CalendarPrefs[K]) => void;
   setUpdatePref: <K extends keyof UpdatePrefs>(key: K, value: UpdatePrefs[K]) => void;
+  setModulePref: <K extends keyof ModulePrefs>(key: K, value: ModulePrefs[K]) => void;
   setLaunchAtLogin: (enabled: boolean) => void;
   hydrateLaunchAtLogin: (enabled: boolean) => void;
 };
@@ -62,6 +64,7 @@ type Persisted = {
   language: Language;
   calendar: CalendarPrefs;
   update: UpdatePrefs;
+  modules: ModulePrefs;
 };
 
 const defaults: Persisted = {
@@ -80,9 +83,9 @@ const defaults: Persisted = {
     showHolidays: true,
     showWeekNumbers: false,
     keyboardShortcut: true,
-    showEvents: false,
   },
   update: { autoCheck: true, includeBeta: false },
+  modules: DEFAULT_MODULES,
 };
 
 function load(): Persisted {
@@ -91,22 +94,27 @@ function load(): Persisted {
     if (!raw) {
       // One-time migration of the legacy standalone theme preference.
       const legacyTheme = localStorage.getItem("calendar-theme") as Theme | null;
-      return legacyTheme ? { ...defaults, theme: legacyTheme } : defaults;
+      return legacyTheme ? { ...defaults, theme: legacyTheme, modules: loadModulePreferences(undefined) } : defaults;
     }
     const parsed = JSON.parse(raw) as Partial<Persisted>;
     const savedOpacity = parsed.appearance?.glassOpacity;
     return {
-      theme: parsed.theme ?? defaults.theme,
+      theme: parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system" ? parsed.theme : defaults.theme,
       appearance: {
         ...defaults.appearance,
-        ...parsed.appearance,
+        ...Object.fromEntries(Object.entries(parsed.appearance ?? {}).filter(([key, value]) => key in defaults.appearance && typeof value === "string" && /^#[\da-f]{6}$/i.test(value))),
         glassOpacity: typeof savedOpacity === "number" && Number.isFinite(savedOpacity)
           ? Math.max(0, Math.min(100, savedOpacity))
           : defaults.appearance.glassOpacity,
       },
-      language: parsed.language ?? defaults.language,
-      calendar: { ...defaults.calendar, ...parsed.calendar },
-      update: { ...defaults.update, ...parsed.update },
+      language: parsed.language === "zh_CN" || parsed.language === "en_US" || parsed.language === "system" ? parsed.language : defaults.language,
+      calendar: {
+        ...defaults.calendar,
+        ...Object.fromEntries(Object.entries(parsed.calendar ?? {}).filter(([key, value]) => key in defaults.calendar && typeof value === "boolean")),
+        weekStart: parsed.calendar?.weekStart === 0 || parsed.calendar?.weekStart === 1 || parsed.calendar?.weekStart === 6 ? parsed.calendar.weekStart : defaults.calendar.weekStart,
+      },
+      update: { ...defaults.update, ...Object.fromEntries(Object.entries(parsed.update ?? {}).filter(([key, value]) => key in defaults.update && typeof value === "boolean")) },
+      modules: loadModulePreferences(parsed.modules),
     };
   } catch {
     return defaults;
@@ -120,6 +128,7 @@ function persist(state: SettingsState) {
     language: state.language,
     calendar: state.calendar,
     update: state.update,
+    modules: state.modules,
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -136,6 +145,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     language: initial.language,
     calendar: initial.calendar,
     update: initial.update,
+    modules: initial.modules,
     launchAtLogin: false,
     ready: false,
 
@@ -174,6 +184,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       set({ update: { ...get().update, [key]: value } });
       persist(get());
     },
+    setModulePref: (key, value) => {
+      set({ modules: { ...get().modules, [key]: value } });
+      persist(get());
+    },
     setLaunchAtLogin: (enabled) => {
       set({ launchAtLogin: enabled });
       // persistence is owned by the OS login manager, not localStorage
@@ -185,13 +199,33 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 });
 
 // Auxiliary panels run in separate WebViews and need to observe settings saved by the main window.
+function reloadSettings() {
+  const next = load();
+  const current = useSettingsStore.getState();
+  if (JSON.stringify({ theme: current.theme, appearance: current.appearance, language: current.language, calendar: current.calendar, update: current.update, modules: current.modules }) !== JSON.stringify(next)) {
+    useSettingsStore.setState(next);
+  }
+}
 window.addEventListener("storage", (event) => {
-  if (event.key === STORAGE_KEY) useSettingsStore.setState(load());
+  if (event.key === STORAGE_KEY || event.key === null) reloadSettings();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) useSettingsStore.setState(load());
+  if (!document.hidden) reloadSettings();
 });
-window.addEventListener("focus", () => useSettingsStore.setState(load()));
+window.addEventListener("focus", reloadSettings);
+
+export async function syncRuntimePreferences() {
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  const { modules } = useSettingsStore.getState();
+  await invoke("runtime_preferences_set", {
+    weatherEnabled: modules.weather,
+    networkEnabled: modules.network,
+  });
+}
+
+useSettingsStore.subscribe((state, previous) => {
+  if (state.modules !== previous.modules) void syncRuntimePreferences().catch(console.error);
+});
 
 export function effectiveAppearance(theme: Theme, systemDark: boolean, appearance: Appearance) {
   const dark = theme === "system" ? systemDark : theme === "dark";

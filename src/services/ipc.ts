@@ -25,6 +25,14 @@ export type StoredLocation = {
   source: string;
 };
 
+export type LocationCandidate = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  country?: string;
+  admin1?: string;
+};
+
 export type CachedWeather = {
   temperature: number;
   apparent_temperature?: number;
@@ -85,6 +93,7 @@ export const worldTimeApi = {
 };
 
 export const locationApi = {
+  search: (query: string, language: string) => invoke<LocationCandidate[]>("location_search", { query, language }),
   get: () => invoke<StoredLocation | null>("location_get"),
   setManual: (latitude: number, longitude: number, label: string) =>
     invoke<StoredLocation>("location_set_manual", { latitude, longitude, label }),

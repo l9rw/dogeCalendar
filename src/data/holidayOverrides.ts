@@ -1,3 +1,6 @@
+// 内置中国法定节假日休/班安排整理数据，覆盖 2007-2026 年。
+// 该数据为人工整理，不宣称已由官方机构核验；运行时来源标注为「内置整理数据」。
+// 未知年份不在此内置范围内，不进行任何法定休/班猜测，需远程获取或用户确认。
 export type HolidayStatus = 'rest' | 'workday';
 
 export interface HolidayOverride {

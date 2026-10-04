@@ -59,6 +59,12 @@ pub(super) fn contains(taskbar: HWND, point: POINT) -> bool {
 }
 
 pub(super) fn hover_rects() -> Vec<RECT> {
+    // Takeover disabled: expose no hover targets so the overlay controller
+    // clears its existing windows on the next refresh tick. The mouse hook
+    // already passes clicks through, so the desktop clock stays usable.
+    if !crate::TAKEOVER_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Vec::new();
+    }
     let Ok(cached) = CLOCKS.try_read() else {
         return Vec::new();
     };
@@ -198,8 +204,16 @@ pub(super) fn start_tracking() {
             CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
         {
             loop {
+                // When takeover is off the hook passes through and no overlay is
+                // shown, so skip the UI Automation scan and idle at a low rate.
+                let active =
+                    crate::TAKEOVER_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
                 let started = Instant::now();
-                let clocks = clock_bounds(&automation).unwrap_or_default();
+                let clocks = if active {
+                    clock_bounds(&automation).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 if let Ok(mut cached) = CLOCKS.write() {
                     let unchanged = cached
                         .as_ref()
@@ -218,7 +232,11 @@ pub(super) fn start_tracking() {
                         *cached = Some((started, clocks));
                     }
                 }
-                std::thread::sleep(TRACKING_INTERVAL);
+                std::thread::sleep(if active {
+                    TRACKING_INTERVAL
+                } else {
+                    Duration::from_secs(2)
+                });
             }
         }
         CoUninitialize();

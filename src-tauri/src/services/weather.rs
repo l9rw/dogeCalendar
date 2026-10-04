@@ -24,31 +24,13 @@ pub async fn fetch_fresh(
     let mut weather = open_meteo::fetch(client, location).await?;
     // Localize the displayed place name to the app's configured language.
     // Reverse geocoding is best-effort: keep the provider label on failure.
-    if let Ok(label) = reverse_geocode::resolve_label(
-        client,
-        location.latitude,
-        location.longitude,
-        language,
-    )
-    .await
+    if let Ok(label) =
+        reverse_geocode::resolve_label(client, location.latitude, location.longitude, language)
+            .await
     {
         weather.location_label = label;
     }
     Ok(weather)
-}
-
-pub fn record_success(
-    store: &Store,
-    location: &StoredLocation,
-    weather: &CachedWeather,
-    now: i64,
-) {
-    store.with(|data| {
-        data.location = Some(location.clone());
-        data.weather = Some(weather.clone());
-        data.weather_failures = 0;
-        data.last_weather_attempt = Some(now);
-    });
 }
 
 pub fn record_failure(store: &Store, now: i64) {

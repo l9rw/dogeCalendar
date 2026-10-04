@@ -8,8 +8,9 @@ import {
   type WeatherReport,
   type WorldClockSnapshot,
 } from "../services/ipc";
-import { useSettingsStore } from "./settingsStore";
+import { useSettingsStore, syncRuntimePreferences } from "./settingsStore";
 import { resolveLanguage } from "../data/i18n";
+let clockSearchRevision = 0;
 
 type InfoState = {
   clocks: WorldClockSnapshot[];
@@ -52,6 +53,7 @@ export const useInfoStore = create<InfoState>((set, get) => ({
   weatherError: null,
 
   loadClocks: async () => {
+    if (!useSettingsStore.getState().modules.worldClock || document.hidden) return;
     const clocks = await worldTimeApi.clocks();
     set({ clocks });
   },
@@ -83,21 +85,25 @@ export const useInfoStore = create<InfoState>((set, get) => ({
   },
 
   search: async (query) => {
+    const revision = ++clockSearchRevision;
     set({ searching: true });
     try {
       const results = await worldTimeApi.search(query);
-      set({ searchResults: results });
+      if (revision === clockSearchRevision) set({ searchResults: results });
     } finally {
-      set({ searching: false });
+      if (revision === clockSearchRevision) set({ searching: false });
     }
   },
 
   loadWeather: async () => {
+    const { modules } = useSettingsStore.getState();
+    if (!modules.weather || document.hidden || get().loadingWeather) return;
     set({ loadingWeather: true, weatherError: null });
     try {
+      await syncRuntimePreferences();
       const language = resolveLanguage(useSettingsStore.getState().language);
       const report = await weatherApi.get(language);
-      set({ weather: report });
+      if (useSettingsStore.getState().modules.weather) set({ weather: report });
     } catch (error) {
       set({
         weatherError: error instanceof Error ? error.message : String(error),
@@ -107,7 +113,9 @@ export const useInfoStore = create<InfoState>((set, get) => ({
     }
   },
 
-  applyWeather: (report) => set({ weather: report }),
+  applyWeather: (report) => {
+    if (useSettingsStore.getState().modules.weather) set({ weather: report });
+  },
 
   clearWeatherCache: async () => {
     await weatherApi.clearCache();
@@ -115,7 +123,9 @@ export const useInfoStore = create<InfoState>((set, get) => ({
   },
 
   loadLocation: async () => {
+    if (!useSettingsStore.getState().modules.weather || document.hidden) return;
     try {
+      await syncRuntimePreferences();
       const location = await locationApi.get();
       set({ location });
     } catch {

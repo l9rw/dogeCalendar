@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useInfoStore } from "../stores/infoStore";
+import { useSettingsStore } from "../stores/settingsStore";
+import { translator } from "../data/i18n";
+import type { WeatherReport } from "../services/ipc";
 
 const ICONS: Record<string, string> = {
   sun: "☀",
@@ -14,6 +18,18 @@ const ICONS: Record<string, string> = {
   storm: "⛈",
 };
 
+function weatherDescription(code: number, fallback: string, inChinese: boolean) {
+  if (inChinese) return fallback;
+  if (code === 0) return "Clear";
+  if (code <= 3) return "Cloudy";
+  if (code === 45 || code === 48) return "Fog";
+  if (code >= 51 && code <= 57) return "Drizzle";
+  if (code >= 61 && code <= 67 || code >= 80 && code <= 82) return "Rain";
+  if (code >= 71 && code <= 77 || code === 85 || code === 86) return "Snow";
+  if (code >= 95) return "Thunderstorm";
+  return "Unknown";
+}
+
 function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
   return (
     <svg className={spinning ? "weather-refresh-icon spinning" : "weather-refresh-icon"} viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -22,25 +38,56 @@ function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
   );
 }
 
-function forecastDate(value: string, index: number) {
-  const date = new Date(`${value}T12:00:00`);
-  if (Number.isNaN(date.getTime())) return index === 0 ? "今天" : `+${index}天`;
-  return index === 0 ? "今天" : `${date.getMonth() + 1}/${date.getDate()}`;
-}
-
 export function WeatherCard() {
   const [refreshing, setRefreshing] = useState(false);
+  const modules = useSettingsStore((state) => state.modules);
+  const language = useSettingsStore((state) => state.language);
+  const { t, inChinese } = useMemo(() => translator(language), [language]);
   const weather = useInfoStore((state) => state.weather);
   const loading = useInfoStore((state) => state.loadingWeather);
   const error = useInfoStore((state) => state.weatherError);
   const loadWeather = useInfoStore((state) => state.loadWeather);
   const loadLocation = useInfoStore((state) => state.loadLocation);
+  const applyWeather = useInfoStore((state) => state.applyWeather);
+
+  const weatherEnabled = modules.weather;
+  const networkEnabled = modules.network;
 
   useEffect(() => {
-    loadLocation().then(() => loadWeather());
-  }, [loadLocation, loadWeather]);
+    if (!weatherEnabled) return;
+    void loadLocation().then(() => void loadWeather());
+  }, [weatherEnabled, networkEnabled, language, loadLocation, loadWeather]);
+
+  useEffect(() => {
+    if (!weatherEnabled) return;
+    const onVisibility = () => {
+      if (!document.hidden) void loadWeather();
+    };
+    const onFocus = () => void loadWeather();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [weatherEnabled, loadWeather]);
+
+  // Each detail WebView has its own store and needs the native refresh event.
+  useEffect(() => {
+    if (!weatherEnabled) return;
+    let disposed = false;
+    const unlisten = listen<WeatherReport>("weather-refreshed", (event) => {
+      if (disposed) return;
+      applyWeather(event.payload);
+    });
+    return () => {
+      disposed = true;
+      void unlisten.then((dispose) => dispose()).catch(console.error);
+    };
+  }, [weatherEnabled, applyWeather]);
 
   const data = weather?.data ?? null;
+
   const refresh = async () => {
     if (loading || refreshing) return;
     setRefreshing(true);
@@ -51,21 +98,43 @@ export function WeatherCard() {
     }
   };
 
+  const formatForecastDate = (value: string, index: number) => {
+    const date = new Date(`${value}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return inChinese ? `+${index}天` : `+${index}d`;
+    if (date.toDateString() === new Date().toDateString()) return t("today");
+    return date.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { month: "numeric", day: "numeric" });
+  };
+
+  if (!weatherEnabled) return null;
+
   if (!data && loading && !refreshing) {
     return (
       <div className="weather-card weather-loading">
-        <span>正在获取天气…</span>
+        <span>{t("weather.loading")}</span>
       </div>
     );
   }
 
   if (!data) {
+    if (!networkEnabled) {
+      return (
+        <div className="weather-card weather-empty">
+          <span className="weather-empty-text">{t("modules.offline")}</span>
+        </div>
+      );
+    }
     return (
       <div className="weather-card weather-empty">
         <span className="weather-empty-text">
-          {error ?? "暂无天气信息"}
+          {error ?? t("weather.empty")}
         </span>
-        <button className="weather-refresh" disabled={loading} onClick={() => void refresh()} aria-label={loading ? "刷新中" : "获取天气"} title={loading ? "刷新中" : "获取天气"}>
+        <button
+          className="weather-refresh"
+          disabled={loading}
+          onClick={() => void refresh()}
+          aria-label={loading || refreshing ? t("weather.refreshing") : t("weather.refresh")}
+          title={loading || refreshing ? t("weather.refreshing") : t("weather.refresh")}
+        >
           <RefreshIcon spinning={loading || refreshing} />
         </button>
       </div>
@@ -78,33 +147,33 @@ export function WeatherCard() {
         <span className="weather-icon">{ICONS[data.icon] ?? "🌤"}</span>
         <div className="weather-temp">
           <strong>{Math.round(data.temperature)}°</strong>
-          <span>{data.description}</span>
+          <span>{weatherDescription(data.weather_code, data.description, inChinese)}</span>
         </div>
       </div>
       <div className="weather-meta">
         <span className="weather-place">{data.location_label.split(",")[0].trim()}</span>
         {data.apparent_temperature != null && (
-          <span>体感 {Math.round(data.apparent_temperature)}°</span>
+          <span>{t("weather.feels")} {Math.round(data.apparent_temperature)}°</span>
         )}
-        {data.humidity != null && <span>湿度 {Math.round(data.humidity)}%</span>}
+        {data.humidity != null && <span>{t("weather.humidity")} {Math.round(data.humidity)}%</span>}
         {data.wind_speed != null && (
-          <span>风速 {Math.round(data.wind_speed)} km/h</span>
+          <span>{t("weather.wind")} {Math.round(data.wind_speed)} km/h</span>
         )}
       </div>
       <button
         className="weather-refresh"
-        disabled={loading || refreshing}
+        disabled={loading || refreshing || !networkEnabled}
         onClick={() => void refresh()}
-        aria-label={loading || refreshing ? "刷新中" : "刷新天气"}
-        title={loading || refreshing ? "刷新中" : "刷新天气"}
+        aria-label={loading || refreshing ? t("weather.refreshing") : t("weather.refresh")}
+        title={loading || refreshing ? t("weather.refreshing") : t("weather.refresh")}
       >
         <RefreshIcon spinning={loading || refreshing} />
       </button>
       {!!data.forecast?.length && (
-        <div className="weather-forecast" aria-label="未来三天天气">
+        <div className="weather-forecast" aria-label={t("weather.forecast")}>
           {data.forecast.slice(0, 3).map((item, index) => (
             <div className="weather-forecast-day" key={item.date}>
-              <span>{forecastDate(item.date, index)}</span>
+              <span>{formatForecastDate(item.date, index)}</span>
               <b>{ICONS[item.icon] ?? "🌤"}</b>
               <strong>{Math.round(item.temperature_max)}° <em>{Math.round(item.temperature_min)}°</em></strong>
             </div>

@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { App } from "./App";
-import { useSettingsStore, effectiveAppearance } from "./stores/settingsStore";
+import { useSettingsStore, effectiveAppearance, syncRuntimePreferences } from "./stores/settingsStore";
 import "./styles/tokens.css";
 
 const settings = useSettingsStore.getState();
@@ -16,6 +16,7 @@ document.documentElement.style.setProperty("--blue", accent);
 document.documentElement.style.setProperty("--shell-bg", background);
 document.documentElement.style.setProperty("--glass-opacity", `${settings.appearance.glassOpacity}%`);
 if ("__TAURI_INTERNALS__" in window) {
+  void syncRuntimePreferences().catch(console.error);
   document.documentElement.dataset.platform = navigator.userAgent.includes("Macintosh") ? "macos" : "windows";
   if (document.documentElement.dataset.platform === "macos") {
     void invoke<boolean>("macos_glass_enabled").then((enabled) => {

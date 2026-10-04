@@ -1,0 +1,53 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run service tests across timezones
+        # Node's Intl respects the TZ env var on every platform (full ICU in
+        # Node 22). Running the pure-logic service tests under UTC, Shanghai
+        # and New York guards against civil-date regressions without duplicating
+        # the slower build/cargo steps per timezone.
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tz in UTC Asia/Shanghai America/New_York; do
+            echo "::group::Tests with TZ=$tz"
+            TZ="$tz" npm test
+            echo "::endgroup::"
+          done
+
+      - name: Type-check and build frontend
+        run: npm run build
+
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
