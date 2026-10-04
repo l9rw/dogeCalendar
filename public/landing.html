@@ -4,9 +4,54 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f8f7f3" />
-    <meta name="description" content="dogeCalendar 是一款轻量桌面日历，随时查看日期、农历、天气与世界时间。前往 GitHub 下载最新版本。" />
+    <meta name="description" content="dogeCalendar 是适用于 Windows 和 macOS 的开源轻量桌面日历。从任务栏时钟或菜单栏快速查看月历、农历、节假日与调休标记、天气、黄历和世界时间，支持中英文与深浅主题。前往 GitHub 下载最新版本。" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://l9rw.github.io/dogeCalendar/" />
+    <link rel="sitemap" type="application/xml" href="https://l9rw.github.io/dogeCalendar/sitemap.xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="dogeCalendar" />
+    <meta property="og:url" content="https://l9rw.github.io/dogeCalendar/" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="dogeCalendar - Windows / macOS 开源桌面日历下载" />
+    <meta property="og:description" content="dogeCalendar 是适用于 Windows 和 macOS 的开源轻量桌面日历。从任务栏时钟或菜单栏快速查看月历、农历、节假日与调休标记、天气、黄历和世界时间，支持中英文与深浅主题。前往 GitHub 下载最新版本。" />
+    <meta property="og:image" content="https://l9rw.github.io/dogeCalendar/windows-app.png" />
+    <meta property="og:image:alt" content="dogeCalendar 月历界面，显示日期、农历与休班标记" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="dogeCalendar - Windows / macOS 开源桌面日历下载" />
+    <meta name="twitter:description" content="dogeCalendar 是适用于 Windows 和 macOS 的开源轻量桌面日历。从任务栏时钟或菜单栏快速查看月历、农历、节假日与调休标记、天气、黄历和世界时间，支持中英文与深浅主题。前往 GitHub 下载最新版本。" />
+    <meta name="twitter:image" content="https://l9rw.github.io/dogeCalendar/windows-app.png" />
+    <meta name="twitter:image:alt" content="dogeCalendar 月历界面，显示日期、农历与休班标记" />
     <link rel="icon" type="image/png" href="./icon.png" />
-    <title>dogeCalendar · 让每一天，一目了然</title>
+    <title>dogeCalendar - Windows / macOS 开源桌面日历下载</title>
+    <script id="site-schema" type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://l9rw.github.io/dogeCalendar/#website",
+            "url": "https://l9rw.github.io/dogeCalendar/",
+            "name": "dogeCalendar",
+            "inLanguage": ["zh-CN", "en"]
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://l9rw.github.io/dogeCalendar/#application",
+            "name": "dogeCalendar",
+            "url": "https://l9rw.github.io/dogeCalendar/",
+            "description": "dogeCalendar 是适用于 Windows 和 macOS 的开源轻量桌面日历。从任务栏时钟或菜单栏快速查看月历、农历、节假日与调休标记、天气、黄历和世界时间，支持中英文与深浅主题。前往 GitHub 下载最新版本。",
+            "applicationCategory": "UtilitiesApplication",
+            "operatingSystem": ["Windows", "macOS"],
+            "inLanguage": ["zh-CN", "en"],
+            "downloadUrl": "https://github.com/l9rw/dogeCalendar/releases/latest",
+            "sameAs": "https://github.com/l9rw/dogeCalendar",
+            "image": "https://l9rw.github.io/dogeCalendar/icon.png",
+            "screenshot": "https://l9rw.github.io/dogeCalendar/windows-app.png",
+            "featureList": ["月历与农历", "节假日与调休标记", "日期详情与黄历", "天气", "世界时间", "中英文与深浅主题"]
+          }
+        ]
+      }
+    </script>
     <script>
       try {
         const savedTheme = localStorage.getItem("dogeCalendar-landing-theme");
@@ -285,7 +330,7 @@
       <main id="top">
         <section class="hero" aria-labelledby="hero-title">
           <div class="hero-copy">
-            <span class="eyebrow" data-i18n="eyebrow">轻量桌面日历</span>
+            <span class="eyebrow" data-i18n="eyebrow">Windows / macOS 开源桌面日历</span>
             <h1 id="hero-title"><span data-i18n="headline1">让每一天，</span><br /><em data-i18n="headline2">一目了然。</em></h1>
             <p class="intro" data-i18n="intro">dogeCalendar 把日历放在顺手的位置。日期、农历、节假日、天气和世界时间，想看时打开，不用时安静待着。</p>
             <div class="actions">
@@ -299,7 +344,7 @@
           </div>
 
           <figure class="visual">
-            <img id="app-screenshot" src="./windows-app.png" width="520" height="620" alt="Windows 本机浏览器预览中实际渲染的 dogeCalendar 月历界面，显示日期、农历与休班标记" data-i18n-alt="screenshotAlt" />
+            <img id="app-screenshot" src="./windows-app.png" width="520" height="620" fetchpriority="high" alt="Windows 本机浏览器预览中实际渲染的 dogeCalendar 月历界面，显示日期、农历与休班标记" data-i18n-alt="screenshotAlt" />
             <figcaption class="visual-caption" data-i18n="screenshotCaption">Windows 应用界面 · 本机浏览器预览截图</figcaption>
           </figure>
         </section>
@@ -382,9 +427,10 @@
       const languageKey = "dogeCalendar-landing-language";
       const translations = {
         zh: {
-          title: "dogeCalendar · 让每一天，一目了然",
-          description: "dogeCalendar 是一款轻量桌面日历，随时查看日期、农历、天气与世界时间。前往 GitHub 下载最新版本。",
-          home: "dogeCalendar 首页", github: "GitHub 项目", eyebrow: "轻量桌面日历",
+          title: "dogeCalendar - Windows / macOS 开源桌面日历下载",
+          description: "dogeCalendar 是适用于 Windows 和 macOS 的开源轻量桌面日历。从任务栏时钟或菜单栏快速查看月历、农历、节假日与调休标记、天气、黄历和世界时间，支持中英文与深浅主题。前往 GitHub 下载最新版本。",
+          imageAlt: "dogeCalendar 月历界面，显示日期、农历与休班标记",
+          home: "dogeCalendar 首页", github: "GitHub 项目", eyebrow: "Windows / macOS 开源桌面日历",
           headline1: "让每一天，", headline2: "一目了然。",
           intro: "dogeCalendar 把日历放在顺手的位置。日期、农历、节假日、天气和世界时间，想看时打开，不用时安静待着。",
           download: "下载最新版本", source: "查看源代码", releaseNote: "前往 GitHub Releases，选择适合你系统的安装包。",
@@ -410,9 +456,10 @@
           lightMode: "日间", darkMode: "夜间", modeSuffix: "模式"
         },
         en: {
-          title: "dogeCalendar · Your days at a glance",
-          description: "dogeCalendar is a lightweight desktop calendar with lunar dates, holidays, weather and world clocks. Get the latest version on GitHub.",
-          home: "dogeCalendar home", github: "GitHub project", eyebrow: "A LIGHTWEIGHT DESKTOP CALENDAR",
+          title: "dogeCalendar - Open-Source Desktop Calendar for Windows & macOS",
+          description: "Download dogeCalendar, an open-source desktop calendar for Windows and macOS with lunar dates, holidays, weather, almanac, world clocks and light/dark themes.",
+          imageAlt: "dogeCalendar month view with lunar dates and holiday markers",
+          home: "dogeCalendar home", github: "GitHub project", eyebrow: "OPEN-SOURCE CALENDAR FOR WINDOWS / MACOS",
           headline1: "Every day,", headline2: "at a glance.",
           intro: "dogeCalendar puts your calendar right where you need it. Dates, lunar days, holidays, weather and world clocks are there when you want them, and out of the way when you don't.",
           download: "Download latest release", source: "View source", releaseNote: "Visit GitHub Releases to choose the installer for your system.",
@@ -449,6 +496,17 @@
         document.documentElement.dataset.language = language;
         document.title = copy.title;
         document.querySelector('meta[name="description"]').content = copy.description;
+        document.querySelector('meta[property="og:title"]').content = copy.title;
+        document.querySelector('meta[name="twitter:title"]').content = copy.title;
+        document.querySelector('meta[property="og:description"]').content = copy.description;
+        document.querySelector('meta[name="twitter:description"]').content = copy.description;
+        document.querySelector('meta[property="og:locale"]').content = language === "en" ? "en_US" : "zh_CN";
+        document.querySelector('meta[property="og:image:alt"]').content = copy.imageAlt;
+        document.querySelector('meta[name="twitter:image:alt"]').content = copy.imageAlt;
+        const schema = document.getElementById("site-schema");
+        const structuredData = JSON.parse(schema.textContent);
+        structuredData["@graph"].find((item) => item["@type"] === "SoftwareApplication").description = copy.description;
+        schema.textContent = JSON.stringify(structuredData);
         document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = copy[node.dataset.i18n]; });
         document.querySelectorAll("[data-i18n-aria]").forEach((node) => { node.setAttribute("aria-label", copy[node.dataset.i18nAria]); });
         document.querySelectorAll("[data-i18n-alt]").forEach((node) => { node.alt = copy[node.dataset.i18nAlt]; });
