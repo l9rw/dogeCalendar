@@ -24,6 +24,7 @@ pub struct WorldClockSnapshot {
     pub offset_label: String,
     pub offset_minutes: i32,
     pub is_today: bool,
+    pub is_dst: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

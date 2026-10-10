@@ -14,6 +14,7 @@ let clockSearchRevision = 0;
 
 type InfoState = {
   clocks: WorldClockSnapshot[];
+  localClock: WorldClockSnapshot | null;
   use24Hour: boolean;
   weather: WeatherReport | null;
   location: StoredLocation | null;
@@ -44,6 +45,7 @@ type InfoState = {
 
 export const useInfoStore = create<InfoState>((set, get) => ({
   clocks: [],
+  localClock: null,
   use24Hour: true,
   weather: null,
   location: null,
@@ -55,7 +57,10 @@ export const useInfoStore = create<InfoState>((set, get) => ({
   loadClocks: async () => {
     if (!useSettingsStore.getState().modules.worldClock || document.hidden) return;
     const clocks = await worldTimeApi.clocks();
-    set({ clocks });
+    set({
+      clocks: clocks.filter((clock) => clock.timezone !== "local"),
+      localClock: clocks.find((clock) => clock.timezone === "local") ?? null,
+    });
   },
 
   loadUse24Hour: async () => {
@@ -86,10 +91,12 @@ export const useInfoStore = create<InfoState>((set, get) => ({
 
   search: async (query) => {
     const revision = ++clockSearchRevision;
-    set({ searching: true });
+    set({ searching: true, searchResults: [] });
     try {
       const results = await worldTimeApi.search(query);
       if (revision === clockSearchRevision) set({ searchResults: results });
+    } catch (error) {
+      if (revision === clockSearchRevision) throw error;
     } finally {
       if (revision === clockSearchRevision) set({ searching: false });
     }

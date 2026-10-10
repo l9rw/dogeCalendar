@@ -16,6 +16,7 @@ export type WorldClockSnapshot = {
   offset_label: string;
   offset_minutes: number;
   is_today: boolean;
+  is_dst: boolean | null;
 };
 
 export type StoredLocation = {
@@ -80,7 +81,9 @@ export type UpdateStatus =
 export const worldTimeApi = {
   listCities: () => invoke<City[]>("world_time_list_cities"),
   search: (query: string) => invoke<City[]>("world_time_search", { query }),
-  clocks: () => invoke<WorldClockSnapshot[]>("world_time_clocks"),
+  clocks: () => invoke<WorldClockSnapshot[]>("world_time_clocks", {
+    localTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  }),
   use24Hour: () => invoke<boolean>("world_time_use_24_hour"),
   setUse24Hour: (enabled: boolean) =>
     invoke<void>("world_time_set_use_24_hour", { enabled }),

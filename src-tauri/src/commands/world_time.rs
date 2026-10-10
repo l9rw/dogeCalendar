@@ -1,3 +1,4 @@
+use chrono_tz::Tz;
 use tauri::State;
 
 use crate::domain::{WorldClockConfig, WorldClockSnapshot};
@@ -15,7 +16,10 @@ pub fn world_time_search(query: String) -> Vec<crate::domain::City> {
 }
 
 #[tauri::command]
-pub fn world_time_clocks(state: State<'_, AppState>) -> Vec<WorldClockSnapshot> {
+pub fn world_time_clocks(
+    state: State<'_, AppState>,
+    local_timezone: Option<String>,
+) -> Vec<WorldClockSnapshot> {
     let configs: Vec<WorldClockConfig> = {
         let data = state.store.data.lock().expect("store mutex poisoned");
         if data.world_clocks.is_empty() {
@@ -24,7 +28,7 @@ pub fn world_time_clocks(state: State<'_, AppState>) -> Vec<WorldClockSnapshot> 
             data.world_clocks.clone()
         }
     };
-    world_time::snapshots(&configs)
+    world_time::snapshots_with_local(&configs, local_timezone.as_deref())
 }
 
 #[tauri::command]
@@ -43,13 +47,21 @@ pub fn world_time_set_use_24_hour(state: State<'_, AppState>, enabled: bool) {
 }
 
 #[tauri::command]
-pub fn world_time_add(state: State<'_, AppState>, label: String, timezone: String) {
+pub fn world_time_add(
+    state: State<'_, AppState>,
+    label: String,
+    timezone: String,
+) -> Result<(), String> {
+    timezone
+        .parse::<Tz>()
+        .map_err(|_| format!("Invalid IANA timezone: {timezone}"))?;
     state.store.with(|data| {
         if data.world_clocks.iter().any(|c| c.timezone == timezone) {
             return;
         }
         data.world_clocks.push(WorldClockConfig { label, timezone });
     });
+    Ok(())
 }
 
 #[tauri::command]
