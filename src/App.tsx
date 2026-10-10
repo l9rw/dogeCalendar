@@ -22,7 +22,7 @@ import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StorageNotice } from "./components/StorageNotice";
-import { parseCivilDate, daysRemainingInYear } from "./services/dateTools";
+import { addCalendarDays, parseCivilDate, daysRemainingInYear } from "./services/dateTools";
 
 type CalendarDay = {
   date: Date;
@@ -370,7 +370,7 @@ function CalendarApp() {
   const [selected, setSelected] = useState(now);
   const [view, setView] = useState<CalendarView>("month");
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsView, setSettingsView] = useState<"menu" | "update">("menu");
+  const [settingsView, setSettingsView] = useState<"menu" | "update" | "countdown">("menu");
   const [infoPanel, setInfoPanel] = useState<"about" | null>(null);
   const [feedbackFailed, setFeedbackFailed] = useState(false);
   const [appVersion, setAppVersion] = useState("");
@@ -380,6 +380,9 @@ function CalendarApp() {
   const [showToolbarMenu, setShowToolbarMenu] = useState(false);
   const [showDateJump, setShowDateJump] = useState(false);
   const [jumpInput, setJumpInput] = useState(() => dateKey(new Date()));
+  const [jumpMode, setJumpMode] = useState<"direct" | "calculate">("direct");
+  const [jumpDirection, setJumpDirection] = useState<1 | -1>(1);
+  const [jumpDayInput, setJumpDayInput] = useState("1");
   const [jumpError, setJumpError] = useState("");
   const [holidayYears, setHolidayYears] = useState<Record<number, HolidayYear>>(getCachedHolidayYears);
   const wheelGesture = useRef({ lastEvent: -Infinity, delta: 0, handled: false });
@@ -500,12 +503,31 @@ function CalendarApp() {
     void invoke("open_aux_panel", { panel: "detail", date: dateKey(date) });
   };
 
+  const jumpBaseDate = parseCivilDate(jumpInput);
+  const jumpDays = /^\d+$/.test(jumpDayInput) ? Number(jumpDayInput) : NaN;
+  const validJumpDays = Number.isSafeInteger(jumpDays);
+  const jumpResult = jumpMode === "direct" ? jumpBaseDate
+    : jumpBaseDate && validJumpDays ? addCalendarDays(jumpBaseDate, jumpDirection * jumpDays) : null;
+  const jumpValidation = !jumpBaseDate ? t("calendar.invalidDate")
+    : jumpMode === "calculate" && !validJumpDays ? t("calendar.invalidDays")
+    : !jumpResult ? t("calendar.calculationOutOfRange") : "";
+  const visibleJumpError = jumpError || (jumpMode === "calculate" ? jumpValidation : "");
+
+  const openDateJump = () => {
+    setJumpInput(dateKey(selected));
+    setJumpMode("direct");
+    setJumpDirection(1);
+    setJumpDayInput("1");
+    setJumpError("");
+    setShowDateJump(true);
+    setShowToolbarMenu(false);
+  };
+
   const jumpToDate = (event: React.FormEvent) => {
     event.preventDefault();
-    const date = parseCivilDate(jumpInput);
-    if (!date) { setJumpError(t("calendar.invalidDate")); return; }
+    if (!jumpResult) { setJumpError(jumpValidation); return; }
     setView("month");
-    selectDate(date);
+    selectDate(jumpResult);
     setShowDateJump(false);
     setJumpError("");
   };
@@ -531,8 +553,7 @@ function CalendarApp() {
       const target = event.target as HTMLElement | null;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
         event.preventDefault();
-        setShowDateJump(true);
-        setShowToolbarMenu(false);
+        openDateJump();
         return;
       }
       if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || target?.isContentEditable || target?.closest("input, select, textarea, [role='dialog']")) return;
@@ -549,7 +570,7 @@ function CalendarApp() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendar.keyboardShortcut, showSettings, infoPanel, showDateJump]);
+  }, [calendar.keyboardShortcut, showSettings, infoPanel, showDateJump, selected]);
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -713,23 +734,64 @@ function CalendarApp() {
                     className="toolbar-menu-item"
                     onClick={() => { void invoke("open_aux_panel", { panel: "clock" }); setShowToolbarMenu(false); }}
                   >
-                    <span className="toolbar-menu-check" />
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <ellipse cx="12" cy="12" rx="4" ry="9" />
+                      <path d="M3 12h18M5 6.5h14M5 17.5h14" />
+                    </svg>
                     <span>{t("menu.worldClock")}</span>
                   </button>}
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => { setView(view === "month" ? "year" : "month"); setShowToolbarMenu(false); }}>
-                    <span className="toolbar-menu-check" /><span>{t(view === "month" ? "calendar.yearView" : "calendar.monthView")}</span>
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      {view === "month" ? <>
+                        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                      </> : <>
+                        <rect x="3" y="5" width="18" height="16" rx="2" />
+                        <path d="M7 3v4M17 3v4M3 11h18M8 15h2M14 15h2M8 18h2" />
+                      </>}
+                    </svg>
+                    <span>{t(view === "month" ? "calendar.yearView" : "calendar.monthView")}</span>
                   </button>
-                  <button role="menuitem" className="toolbar-menu-item" onClick={() => { setShowDateJump(true); setShowToolbarMenu(false); }}>
-                    <span className="toolbar-menu-check" /><span>{t("calendar.jump")}</span>
+                  <button role="menuitem" className="toolbar-menu-item" onClick={openDateJump}>
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M11 21H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4M7 3v4M17 3v4M3 11h10M14 17h7M18 14l3 3-3 3" />
+                    </svg>
+                    <span>{t("calendar.jump")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => { openSettings(); setShowToolbarMenu(false); }}>
-                    <span className="toolbar-menu-check" /><span>{t("menu.settings")}</span>
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 3v4M4 11v10M12 3v10M12 17v4M20 3v4M20 11v10" />
+                      <circle cx="4" cy="9" r="2" />
+                      <circle cx="12" cy="15" r="2" />
+                      <circle cx="20" cy="9" r="2" />
+                    </svg>
+                    <span>{t("menu.settings")}</span>
+                  </button>
+                  <button role="menuitem" className="toolbar-menu-item" onClick={() => { openSettings(); setSettingsView("countdown"); setShowToolbarMenu(false); }}>
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 3h14M5 21h14M7 3v4l5 5-5 5v4M17 3v4l-5 5 5 5v4M9 6h6M9 18h6" />
+                    </svg>
+                    <span>{t("settings.countdown")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => void checkUpdates()}>
-                    <span className="toolbar-menu-check">{updateStatus === "available" ? "•" : ""}</span><span>{t("menu.onlineUpdate")}</span>
+                    <span className="toolbar-menu-icon-wrap" aria-hidden="true">
+                      <svg className="toolbar-menu-icon" viewBox="0 0 24 24">
+                        <path d="M20 8a8.5 8.5 0 0 0-14-3L3 8M3 3v5h5M4 16a8.5 8.5 0 0 0 14 3l3-3M16 16h5v5" />
+                      </svg>
+                      {updateStatus === "available" && <span className="toolbar-menu-update-dot" />}
+                    </span>
+                    <span>{t("menu.onlineUpdate")}</span>
                   </button>
                   <button role="menuitem" className="toolbar-menu-item" onClick={showAbout}>
-                    <span className="toolbar-menu-check" /><span>{t("menu.about")}</span>
+                    <svg className="toolbar-menu-icon" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 11v6" />
+                      <circle cx="12" cy="7" r="1" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span>{t("menu.about")}</span>
                   </button>
                 </div>
               </>
@@ -738,12 +800,38 @@ function CalendarApp() {
         </header>
 
         <div className="calendar-body">
-        {showDateJump && <form className="popover date-jump" role="dialog" aria-label={t("calendar.jump")} onSubmit={jumpToDate} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setShowDateJump(false); } }}>
+        {showDateJump && <form className="popover date-jump" role="dialog" aria-label={t("calendar.jump")} noValidate onSubmit={jumpToDate} onKeyDown={(event) => { if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.stopPropagation(); setShowDateJump(false); } }}>
           <button type="button" className="popover-close" aria-label={t("settings.close")} onClick={() => setShowDateJump(false)}>×</button>
-          <label htmlFor="jump-date">{t("calendar.jump")}</label>
-          <input id="jump-date" type="date" min="1900-01-01" max="2100-12-31" className="settings-select" value={jumpInput} onChange={(event) => setJumpInput(event.target.value)} autoFocus required />
+          <strong className="date-jump-title">{t("calendar.jump")}</strong>
+          <div className="date-jump-modes" role="group" aria-label={t("calendar.jumpMode")}>
+            {(["direct", "calculate"] as const).map((mode) => <button type="button" key={mode} className="info-button" aria-pressed={jumpMode === mode} onClick={() => { setJumpMode(mode); setJumpError(""); }}>{t(mode === "direct" ? "calendar.directJump" : "calendar.calculateDate")}</button>)}
+          </div>
+          <div className="date-jump-field">
+            <label htmlFor="jump-date">{t(jumpMode === "calculate" ? "calendar.baseDate" : "calendar.targetDate")}</label>
+            <input id="jump-date" type="date" min="1900-01-01" max="2100-12-31" className="settings-select" value={jumpInput} onChange={(event) => { setJumpInput(event.target.value); setJumpError(""); }} autoFocus required />
+          </div>
+          {jumpMode === "calculate" && <>
+            <div className="date-jump-offset">
+              <div className="date-jump-field">
+                <label htmlFor="jump-direction">{t("calendar.direction")}</label>
+                <select id="jump-direction" className="settings-select" value={jumpDirection} onChange={(event) => { setJumpDirection(Number(event.target.value) as 1 | -1); setJumpError(""); }}>
+                  <option value={1}>{t("calendar.daysAfter")}</option>
+                  <option value={-1}>{t("calendar.daysBefore")}</option>
+                </select>
+              </div>
+              <div className="date-jump-field">
+                <label htmlFor="jump-days">{t("calendar.dayCount")}</label>
+                <input id="jump-days" className="settings-select" type="number" min="0" step="1" inputMode="numeric" value={jumpDayInput} onChange={(event) => { setJumpDayInput(event.target.value); setJumpError(""); }} aria-describedby="jump-calculation-hint" required />
+              </div>
+            </div>
+            <p id="jump-calculation-hint" className="date-jump-hint">{t("calendar.calculationHint")}</p>
+            {jumpResult && <output className="date-jump-result" aria-live="polite">
+              <span>{t("calendar.calculationResult")}</span>
+              <strong>{dateKey(jumpResult)} · {t(`weekday.full.${weekdayKeys()[jumpResult.getDay()]}`)}</strong>
+            </output>}
+          </>}
+          {visibleJumpError && <span className="date-format-error" role="alert">{visibleJumpError}</span>}
           <button className="info-button" type="submit">{t("calendar.go")}</button>
-          {jumpError && <span className="date-format-error" role="alert">{jumpError}</span>}
         </form>}
         {view === "month" ? (
           <div className="calendar-card" onWheel={handleCalendarWheel}>

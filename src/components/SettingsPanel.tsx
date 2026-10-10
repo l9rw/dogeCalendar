@@ -14,9 +14,33 @@ import {
 } from "../data/colors";
 import { autostartApi, locationApi, type LocationCandidate, type UpdateStatus, type UpdateCheck } from "../services/ipc";
 import { StorageNotice } from "./StorageNotice";
+import { CountdownSettings } from "./CountdownSettings";
 
 type MenuBarStyle = "calendar" | "date" | "weekday_date";
-type View = "menu" | "appearance" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update" | "modules";
+type View = "menu" | "appearance" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update" | "modules" | "countdown";
+
+type SettingsIconName = Exclude<View, "menu"> | "settings" | "launch" | "back" | "light" | "dark" | "system";
+
+function SettingsIcon({ name }: { name: SettingsIconName }) {
+  const paths: Record<SettingsIconName, string> = {
+    settings: "M4 3v4M4 11v10M12 3v10M12 17v4M20 3v4M20 11v10M6 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0M14 15a2 2 0 1 1-4 0 2 2 0 0 1 4 0M22 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0",
+    appearance: "M14 3h7v7M21 3 11 13l-3-3L18 3M11 13c1 4-2 8-8 8 2-2 0-5 3-7 2-1 3-1 5-1Z",
+    calendar: "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2ZM7 3v4M17 3v4M3 11h18M8 15h2M14 15h2M8 18h2",
+    countdown: "M5 3h14M5 21h14M7 3v4l5 5-5 5v4M17 3v4l-5 5 5 5v4M9 6h6M9 18h6",
+    modules: "M3 3h7v7H3ZM14 3h7v7h-7ZM3 14h7v7H3ZM14 17.5h7M17.5 14v7",
+    language: "M3 5h12M9 3v2M5 5c0 5 3 8 8 10M13 5c0 5-3 8-8 10M13 21l4-11 4 11M14.5 17h5",
+    menubar: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM3 9h18M15 6.5h3",
+    taskbarDate: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM3 15h18M15 17.5h3M8 11V7M6 9h4",
+    location: "M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+    update: "M20 8a8.5 8.5 0 0 0-14-3L3 8M3 3v5h5M4 16a8.5 8.5 0 0 0 14 3l3-3M16 16h5v5",
+    launch: "M12 3v9M6 5a9 9 0 1 0 12 0",
+    back: "M15 5l-7 7 7 7",
+    light: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5",
+    dark: "M20.5 13A9 9 0 0 1 11 3.5 9 9 0 1 0 20.5 13Z",
+    system: "M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM8 21h8M12 17v4",
+  };
+  return <svg className="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>;
+}
 
 const DATE_TEMPLATES = [
   ["yyyy/M/d", "简洁", "2026/9/28"],
@@ -53,11 +77,13 @@ function Toggle({
 }
 
 function NavRow({
+  icon,
   label,
   value,
   onClick,
   children,
 }: {
+  icon: SettingsIconName;
   label: string;
   value?: string;
   onClick?: () => void;
@@ -65,6 +91,7 @@ function NavRow({
 }) {
   return (
     <button className="settings-nav-row" onClick={onClick} type="button">
+      <SettingsIcon name={icon} />
       <span className="nav-label">{label}</span>
       {value && <span className="nav-value">{value}</span>}
       {children}
@@ -126,7 +153,7 @@ export function SettingsPanel({
   updateStatus: UpdateStatus;
   updateRelease: UpdateCheck["release"];
   updateError: string;
-  initialView?: "menu" | "update";
+  initialView?: "menu" | "update" | "countdown";
 }) {
   const isMac = document.documentElement.dataset.platform === "macos";
   const isWindows = document.documentElement.dataset.platform === "windows";
@@ -210,7 +237,7 @@ export function SettingsPanel({
     <section className="settings-panel" aria-label={t("settings.title")}>
       <div className="settings-header">
         <div>
-          <h2>{t(titleKey)}</h2>
+          <h2><SettingsIcon name={view === "menu" ? "settings" : view} />{t(titleKey)}</h2>
         </div>
         <button className="settings-close" onClick={onClose} aria-label={t("settings.close")}>×</button>
       </div>
@@ -218,18 +245,21 @@ export function SettingsPanel({
       {view === "menu" ? (
         <nav className="settings-nav">
           <StorageNotice />
-          <NavRow label={t("settings.appearance")} value={t(`theme.${store.theme === "system" ? "system" : store.theme}`)} onClick={() => setView("appearance")} />
-          <NavRow label={t("settings.calendar")} onClick={() => setView("calendar")} />
-          <NavRow label={t("settings.modules")} onClick={() => setView("modules")} />
+          <NavRow icon="appearance" label={t("settings.appearance")} value={t(`theme.${store.theme === "system" ? "system" : store.theme}`)} onClick={() => setView("appearance")} />
+          <NavRow icon="calendar" label={t("settings.calendar")} onClick={() => setView("calendar")} />
+          <NavRow icon="countdown" label={t("settings.countdown")} onClick={() => setView("countdown")} />
+          <NavRow icon="modules" label={t("settings.modules")} onClick={() => setView("modules")} />
           <NavRow
+            icon="language"
             label={t("settings.language")}
             value={store.language === "system" ? t("language.system") : store.language === "zh_CN" ? t("language.zh_CN") : t("language.en_US")}
             onClick={() => setView("language")}
           />
-          {isMac && <NavRow label={t("settings.menubarStyle")} onClick={() => setView("menubar")} />}
-          {isWindows && <NavRow label={t("settings.taskbarDate")} onClick={() => setView("taskbarDate")} />}
-          <NavRow label={t("settings.locationWeather")} onClick={() => setView("location")} />
+          {isMac && <NavRow icon="menubar" label={t("settings.menubarStyle")} onClick={() => setView("menubar")} />}
+          {isWindows && <NavRow icon="taskbarDate" label={t("settings.taskbarDate")} onClick={() => setView("taskbarDate")} />}
+          <NavRow icon="location" label={t("settings.locationWeather")} onClick={() => setView("location")} />
           <div className="settings-nav-row">
+            <SettingsIcon name="launch" />
             <span className="nav-label">{t("settings.launchAtLogin")}</span>
             <button
               type="button"
@@ -255,7 +285,7 @@ export function SettingsPanel({
                   className={`theme-option ${store.theme === option.value ? "active" : ""}`}
                   onClick={() => store.setTheme(option.value)}
                 >
-                  <span className={`theme-dot ${option.value}`} />
+                  <SettingsIcon name={option.value} />
                   <span className="theme-label">{option.label}</span>
                   <span className="theme-desc">{option.desc}</span>
                 </button>
@@ -318,6 +348,11 @@ export function SettingsPanel({
           }} />}
           <p className="settings-description">{t("calendar.globalShortcutHint")}</p>
           {(shortcutError || globalShortcut?.error) && <p className="date-format-error" role="alert">{shortcutError || globalShortcut?.error}</p>}
+        </>
+      ) : view === "countdown" ? (
+        <>
+          <BackRow onBack={back} />
+          <CountdownSettings />
         </>
       ) : view === "modules" ? (
         <>
@@ -400,7 +435,7 @@ export function SettingsPanel({
 
 function BackRow({ onBack }: { onBack: () => void }) {
   const language = useSettingsStore((state) => state.language);
-  return <button className="settings-back" onClick={onBack} style={{ marginBottom: 14 }}>‹ {translator(language).t("settings.back")}</button>;
+  return <button className="settings-back" onClick={onBack} style={{ marginBottom: 14 }}><SettingsIcon name="back" />{translator(language).t("settings.back")}</button>;
 }
 
 function matchSystemDark() {

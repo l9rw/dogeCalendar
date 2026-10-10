@@ -1145,14 +1145,11 @@ async fn open_aux_panel(
         .outer_size()
         .map_err(|error| error.to_string())?
         .to_logical::<f64>(scale);
-    let height = if label == "detail" {
-        main.inner_size()
-            .map_err(|error| error.to_string())?
-            .to_logical::<f64>(scale)
-            .height
-    } else {
-        300.0
-    };
+    let height = main
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale)
+        .height;
     let (left, top, right, bottom) =
         if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
             #[cfg(target_os = "macos")]
@@ -1180,10 +1177,13 @@ async fn open_aux_panel(
     .clamp(left, (right - width).max(left));
     let y = main_pos.y.clamp(top, (bottom - height).max(top));
     if let Some(window) = app.get_webview_window(label) {
+        window
+            .set_size(tauri::LogicalSize::new(width, height))
+            .map_err(|error| error.to_string())?;
+        window
+            .set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(|error| error.to_string())?;
         if label == "detail" {
-            window
-                .set_position(tauri::LogicalPosition::new(x, y))
-                .map_err(|error| error.to_string())?;
             if let Some(date) = date {
                 app.emit_to(label, "detail-date-changed", date)
                     .map_err(|error| error.to_string())?;
@@ -1302,6 +1302,7 @@ pub fn run() {
     }));
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1372,6 +1373,12 @@ pub fn run() {
             commands::runtime::runtime_preferences_get,
             commands::runtime::runtime_preferences_set,
             commands::runtime::storage_health_get,
+            commands::countdown::countdown_list,
+            commands::countdown::countdown_save,
+            commands::countdown::countdown_delete,
+            commands::countdown::notification_config_get,
+            commands::countdown::notification_config_save,
+            commands::countdown::notification_test,
             global_shortcut_get,
             global_shortcut_set,
             #[cfg(windows)]
@@ -1408,6 +1415,8 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("calendar-desktop"));
             app.manage(AppState::new(dir));
+            let countdown_store = app.state::<AppState>().store.clone();
+            commands::countdown::start_scheduler(app.handle().clone(), countdown_store);
 
             // Register the persisted global wake shortcut (default on). A
             // registration conflict is captured into state rather than failing

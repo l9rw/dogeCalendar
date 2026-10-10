@@ -192,3 +192,34 @@ test("round-trip: addCalendarDays is the inverse of differenceInDays across DST"
   assert.equal(differenceInDays(start, target), offset);
   assert.equal(differenceInDays(target, start), -offset);
 });
+
+test("date jump calculations count forward and backward from the base date", () => {
+  const cases = [
+    ["2026-10-10", 100, "2027-01-18"],
+    ["2026-10-10", -100, "2026-07-02"],
+    ["2024-03-01", -1, "2024-02-29"],
+    ["2025-03-01", -1, "2025-02-28"],
+    ["2026-01-31", 1, "2026-02-01"],
+    ["2026-10-10", 0, "2026-10-10"],
+  ];
+  for (const [base, days, expected] of cases) {
+    const start = civ(base);
+    const result = addCalendarDays(start, days);
+    assert.ok(result);
+    assert.equal(formatCivilDate(result), expected);
+    assert.equal(differenceInDays(start, result), days);
+    assert.equal(formatCivilDate(start), base);
+  }
+});
+
+test("date jump calculations allow the entire supported range but reject overflow", () => {
+  const first = civ("1900-01-01");
+  const last = civ("2100-12-31");
+  const days = differenceInDays(first, last);
+  assert.equal(formatCivilDate(addCalendarDays(first, days)), "2100-12-31");
+  assert.equal(formatCivilDate(addCalendarDays(last, -days)), "1900-01-01");
+  assert.equal(addCalendarDays(first, days + 1), null);
+  assert.equal(addCalendarDays(last, -days - 1), null);
+  assert.equal(addCalendarDays(first, Number.MAX_SAFE_INTEGER), null);
+  assert.equal(addCalendarDays(last, -Number.MAX_SAFE_INTEGER), null);
+});

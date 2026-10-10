@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default permissions for the calendar window",
   "windows": ["main", "detail", "clock"],
-  "permissions": ["core:default", "opener:default"]
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission"
+  ]
 }

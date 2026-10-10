@@ -121,6 +121,54 @@ pub struct StoreData {
     // run; a registration conflict surfaces an error without disabling the app.
     #[serde(default = "default_true")]
     pub global_shortcut_enabled: bool,
+    #[serde(default)]
+    pub countdowns: Vec<CountdownRecord>,
+    #[serde(default)]
+    pub notification_config: NotificationConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CountdownRecord {
+    pub id: String,
+    pub title: String,
+    pub target_at: i64,
+    pub language: String,
+    #[serde(default)]
+    pub reminded_at: Option<i64>,
+    #[serde(default)]
+    pub delivery_results: Vec<DeliveryResult>,
+    #[serde(default)]
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryResult {
+    pub channel: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationConfig {
+    #[serde(default)]
+    pub bark_enabled: bool,
+    #[serde(default = "default_bark_server")]
+    pub bark_server: String,
+    #[serde(default)]
+    pub serverchan_enabled: bool,
+}
+
+fn default_bark_server() -> String {
+    "https://api.day.app".into()
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            bark_enabled: false,
+            bark_server: default_bark_server(),
+            serverchan_enabled: false,
+        }
+    }
 }
 
 // Explicit Default mirrors the serde defaults above. The store loader falls
@@ -144,6 +192,8 @@ impl Default for StoreData {
             #[cfg(windows)]
             taskbar_clock_takeover_enabled: true,
             global_shortcut_enabled: true,
+            countdowns: Vec::new(),
+            notification_config: NotificationConfig::default(),
         }
     }
 }
