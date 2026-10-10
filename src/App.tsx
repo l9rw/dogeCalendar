@@ -41,6 +41,7 @@ type CalendarDay = {
 type CalendarView = "month" | "year";
 const IGNORED_UPDATE_KEY = "calendar-ignored-update";
 const REPOSITORY_URL = "https://github.com/l9rw/dogeCalendar";
+const FEEDBACK_URL = `mailto:i@l9rw.cn?subject=${encodeURIComponent("dogeCalendar 意见反馈")}`;
 
 function useVisibleToday() {
   const [today, setToday] = useState(() => dateKey(new Date()));
@@ -371,6 +372,7 @@ function CalendarApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsView, setSettingsView] = useState<"menu" | "update">("menu");
   const [infoPanel, setInfoPanel] = useState<"about" | null>(null);
+  const [feedbackFailed, setFeedbackFailed] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateRelease, setUpdateRelease] = useState<UpdateCheck["release"]>(null);
@@ -475,6 +477,7 @@ function CalendarApp() {
   const showAbout = () => {
     setShowSettings(false);
     setShowToolbarMenu(false);
+    setFeedbackFailed(false);
     setInfoPanel("about");
   };
 
@@ -579,9 +582,6 @@ function CalendarApp() {
       listen("open-settings", () => {
       openSettings();
       }),
-      listen("open-menubar-settings", () => {
-      openSettings();
-      }),
       listen("open-update", () => {
       void checkUpdates();
       }),
@@ -633,7 +633,12 @@ function CalendarApp() {
           <div className="info-actions">
             <button className="info-button primary" onClick={() => void checkUpdates()}>{t("update.checkNow")}</button>
             <button className="info-button" onClick={() => void openUrl(REPOSITORY_URL)}>{t("about.repo")}</button>
+            <button className="info-button" type="button" onClick={() => {
+              setFeedbackFailed(false);
+              void openUrl(FEEDBACK_URL).catch(() => setFeedbackFailed(true));
+            }}>{t("about.feedback")}</button>
           </div>
+          {feedbackFailed && <p className="date-format-error" role="alert">{t("about.feedbackFailed")}</p>}
         </section>
       ) : showSettings ? (
         <SettingsPanel
@@ -722,14 +727,6 @@ function CalendarApp() {
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => { setShowDateJump(true); setShowToolbarMenu(false); }}>
                     <span className="toolbar-menu-check" /><span>{t("calendar.jump")}</span>
                   </button>
-                  {isMac && <button
-                    role="menuitem"
-                    className="toolbar-menu-item"
-                    onClick={() => { openSettings(); setShowToolbarMenu(false); }}
-                  >
-                    <span className="toolbar-menu-check" />
-                    <span>{t("menu.menubarSettings")}</span>
-                  </button>}
                   <button role="menuitem" className="toolbar-menu-item" onClick={() => { openSettings(); setShowToolbarMenu(false); }}>
                     <span className="toolbar-menu-check" /><span>{t("menu.settings")}</span>
                   </button>

@@ -101,6 +101,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .update-message strong { color: var(--blue); font-size: 18px; }
 .update-message span { color: var(--text-dim); font-size: 13px; }
 .info-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 28px; }
+.info-panel .info-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.info-panel .info-actions > :last-child { grid-column: 1 / -1; }
 .info-button { flex: 1; min-height: 38px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); cursor: pointer; font-size: 12px; }
 .info-button.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
 .info-button:disabled { opacity: .6; cursor: default; }

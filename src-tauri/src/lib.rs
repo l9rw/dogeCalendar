@@ -971,7 +971,6 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
             &MenuItem::with_id(app, "open-calendar", "打开日历", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
-            &MenuItem::with_id(app, "menubar-settings", "标题栏设置", true, None::<&str>)?,
             &MenuItem::with_id(app, "online-update", "在线更新", true, None::<&str>)?,
             &MenuItem::with_id(app, "about", "关于", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
@@ -990,7 +989,6 @@ fn setup_macos_menu_bar(app: &mut tauri::App) -> tauri::Result<()> {
             let ui_event = match event.id().as_ref() {
                 "open-calendar" => None,
                 "settings" => Some("open-settings"),
-                "menubar-settings" => Some("open-menubar-settings"),
                 "online-update" => Some("open-update"),
                 "about" => Some("open-about"),
                 _ => return,

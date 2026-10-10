@@ -171,6 +171,8 @@ const zh: Dict = {
 
   "about.tagline": "随手查日期、看休假。离线可用，无需账号。",
   "about.repo": "GitHub 仓库",
+  "about.feedback": "给开发者提意见",
+  "about.feedbackFailed": "无法打开邮件应用，请设置默认邮件应用，或手动发送邮件至 i@l9rw.cn，主题为“dogeCalendar 意见反馈”。",
 
   "weekday.mon": "一",
   "weekday.tue": "二",
@@ -190,7 +192,6 @@ const zh: Dict = {
 
   "menu.openCalendar": "打开日历",
   "menu.settings": "设置",
-  "menu.menubarSettings": "标题栏设置",
   "menu.onlineUpdate": "在线更新",
   "menu.about": "关于",
   "menu.quit": "退出",
@@ -373,6 +374,8 @@ const en: Dict = {
 
   "about.tagline": "Check dates, see holidays. Works offline, no account needed.",
   "about.repo": "GitHub repository",
+  "about.feedback": "Send feedback",
+  "about.feedbackFailed": "Could not open your mail app. Set a default mail app, or email i@l9rw.cn with the subject \"dogeCalendar 意见反馈\".",
 
   "weekday.mon": "Mon",
   "weekday.tue": "Tue",
@@ -392,7 +395,6 @@ const en: Dict = {
 
   "menu.openCalendar": "Open calendar",
   "menu.settings": "Settings",
-  "menu.menubarSettings": "Menubar settings",
   "menu.onlineUpdate": "Online update",
   "menu.about": "About",
   "menu.quit": "Quit",
