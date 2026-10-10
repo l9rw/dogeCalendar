@@ -8,11 +8,12 @@ use windows::Win32::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_MULTITHREADED,
     },
+    System::Variant::VARIANT,
     UI::{
         Accessibility::{
             CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern,
             IUIAutomationLegacyIAccessiblePattern, TreeScope_Children, TreeScope_Descendants,
-            UIA_InvokePatternId, UIA_LegacyIAccessiblePatternId,
+            UIA_ClassNamePropertyId, UIA_InvokePatternId, UIA_LegacyIAccessiblePatternId,
         },
         WindowsAndMessaging::{GetWindowRect, IsWindowVisible},
     },
@@ -102,9 +103,33 @@ fn clock_buttons(
     automation: &IUIAutomation,
 ) -> windows::core::Result<Vec<(ClockBounds, IUIAutomationElement)>> {
     unsafe {
-        let all = automation.CreateTrueCondition()?;
+        let primary = automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("Shell_TrayWnd"),
+        )?;
+        let secondary = automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("Shell_SecondaryTrayWnd"),
+        )?;
+        let taskbars = automation.CreateOrCondition(&primary, &secondary)?;
+        let legacy_clock = automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("TrayClockWClass"),
+        )?;
+        let clock = automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("ClockButton"),
+        )?;
+        let omni = automation.CreatePropertyCondition(
+            UIA_ClassNamePropertyId,
+            &VARIANT::from("SystemTray.OmniButton"),
+        )?;
+        let clocks_condition = automation.CreateOrCondition(
+            &automation.CreateOrCondition(&legacy_clock, &clock)?,
+            &omni,
+        )?;
         let desktop = automation.GetRootElement()?;
-        let windows = desktop.FindAll(TreeScope_Children, &all)?;
+        let windows = desktop.FindAll(TreeScope_Children, &taskbars)?;
         let walker = automation.RawViewWalker()?;
         let mut clocks = Vec::new();
         for index in 0..windows.Length()? {
@@ -115,7 +140,8 @@ fn clock_buttons(
             let hwnd = taskbar.CurrentNativeWindowHandle()?;
             let mut taskbar_rect = RECT::default();
             GetWindowRect(hwnd, &mut taskbar_rect)?;
-            let elements = taskbar.FindAll(TreeScope_Descendants, &all)?;
+            // Filter in UIA instead of transferring every taskbar descendant.
+            let elements = taskbar.FindAll(TreeScope_Descendants, &clocks_condition)?;
             for index in 0..elements.Length()? {
                 let button = elements.GetElement(index)?;
                 let class = button.CurrentClassName()?.to_string();
@@ -288,6 +314,63 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a visible Windows taskbar"]
+    fn filtered_queries_match_full_enumeration() {
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap();
+            {
+                let automation: IUIAutomation =
+                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).unwrap();
+                let all = automation.CreateTrueCondition().unwrap();
+                let desktop = automation.GetRootElement().unwrap();
+                let windows = desktop.FindAll(TreeScope_Children, &all).unwrap();
+                let mut taskbar_count = 0;
+                let mut total_descendants = 0;
+                let mut clock_candidates = 0;
+                for index in 0..windows.Length().unwrap() {
+                    let taskbar = windows.GetElement(index).unwrap();
+                    if !is_taskbar_class(&taskbar.CurrentClassName().unwrap().to_string()) {
+                        continue;
+                    }
+                    taskbar_count += 1;
+                    let elements = taskbar.FindAll(TreeScope_Descendants, &all).unwrap();
+                    total_descendants += elements.Length().unwrap();
+                    for class in ["TrayClockWClass", "ClockButton", "SystemTray.OmniButton"] {
+                        let condition = automation
+                            .CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from(class))
+                            .unwrap();
+                        let filtered = taskbar.FindAll(TreeScope_Descendants, &condition).unwrap();
+                        let expected = (0..elements.Length().unwrap())
+                            .filter(|&index| {
+                                elements.GetElement(index).unwrap()
+                                    .CurrentClassName().unwrap() == class
+                            })
+                            .count();
+                        assert_eq!(filtered.Length().unwrap() as usize, expected, "class {class}");
+                        clock_candidates += filtered.Length().unwrap();
+                    }
+                }
+                assert!(taskbar_count > 0);
+                let primary = automation
+                    .CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from("Shell_TrayWnd"))
+                    .unwrap();
+                let secondary = automation
+                    .CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from("Shell_SecondaryTrayWnd"))
+                    .unwrap();
+                let condition = automation.CreateOrCondition(&primary, &secondary).unwrap();
+                assert_eq!(
+                    desktop.FindAll(TreeScope_Children, &condition).unwrap().Length().unwrap(),
+                    taskbar_count,
+                );
+                assert!(clock_candidates > 0);
+                assert!(!clock_bounds(&automation).unwrap().is_empty());
+                println!("UIA full query: {} desktop windows, {total_descendants} taskbar descendants; filtered candidates: {taskbar_count} taskbars, {clock_candidates} clock buttons", windows.Length().unwrap());
+            }
+            CoUninitialize();
+        }
+    }
+
+    #[test]
     #[ignore = "requires a visible Windows 11 taskbar"]
     fn detects_live_clock_without_intercepting_adjacent_controls() {
         unsafe {
@@ -297,15 +380,32 @@ mod tests {
                     CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).unwrap();
                 let clocks = clock_bounds(&automation).unwrap();
                 assert!(!clocks.is_empty(), "no visible Windows 11 clock found");
-                let rectangles: Vec<_> = clocks.iter().map(|clock| clock.clock_rect).collect();
+                let rectangles: Vec<_> = clocks.iter()
+                    .map(|clock| (clock.taskbar, clock.clock_rect)).collect();
                 *CLOCKS.write().unwrap() = Some((Instant::now(), clocks));
                 assert!(!hover_rects().is_empty());
-                for rect in rectangles {
+                for (taskbar, rect) in rectangles {
                     let point = POINT {
                         x: (rect.left + rect.right) / 2,
                         y: (rect.top + rect.bottom) / 2,
                     };
-                    assert!(crate::is_taskbar_clock(point));
+                    let taskbar = HWND(taskbar as *mut _);
+                    assert!(contains(taskbar, point));
+                    assert!(!contains(taskbar, POINT {
+                        x: rect.left - 20,
+                        y: point.y,
+                    }));
+                    let hit = windows::Win32::UI::WindowsAndMessaging::WindowFromPoint(point);
+                    // A running calendar owns its own shield, bypassing the hook.
+                    if crate::class_name(hit) == "CalendarClockHoverOverlay" {
+                        println!("Hook hit check skipped: existing calendar shield covers {rect:?}");
+                    } else {
+                        assert!(
+                            crate::is_taskbar_clock(point),
+                            "clock {rect:?} is covered by window {:?} ({})",
+                            hit, crate::class_name(hit),
+                        );
+                    }
                     assert!(!crate::is_taskbar_clock(POINT {
                         x: rect.left - 20,
                         y: point.y

@@ -16,7 +16,7 @@ import {
   type Theme,
 } from "./stores/settingsStore";
 import { translator } from "./data/i18n";
-import type { WeatherReport, UpdateCheck, UpdateStatus } from "./services/ipc";
+import type { UpdateCheck, UpdateStatus } from "./services/ipc";
 import { updateApi } from "./services/ipc";
 import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
@@ -552,8 +552,10 @@ function CalendarApp() {
   }, [calendar.keyboardShortcut, showSettings, infoPanel, showDateJump]);
 
   const handleCalendarWheel = (event: React.WheelEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (showToolbarMenu || showDateJump || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      || target.closest("input, select, textarea, [contenteditable='true']")) return;
     if (isMac) {
-      if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
       const gesture = wheelGesture.current;
       if (event.timeStamp - gesture.lastEvent > 180) {
         gesture.delta = 0;
@@ -568,7 +570,12 @@ function CalendarApp() {
       }
       return;
     }
-    if (!event.ctrlKey && Math.abs(event.deltaY) > Math.abs(event.deltaX) && Math.abs(event.deltaY) >= 8) moveMonth(event.deltaY < 0 ? -1 : 1);
+    const gesture = wheelGesture.current;
+    if (Math.abs(event.deltaX) === Math.abs(event.deltaY)) return;
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
+    if (Math.abs(delta) < 8 || event.timeStamp - gesture.lastEvent < 160) return;
+    gesture.lastEvent = event.timeStamp;
+    moveMonth(delta < 0 ? -1 : 1);
   };
 
   const selectedKey = selected.toDateString();
@@ -595,18 +602,6 @@ function CalendarApp() {
           if (result.status === "fulfilled") result.value();
         });
       });
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    const dispose = listen<unknown>("weather-refreshed", (event) => {
-      if (disposed) return;
-      useInfoStore.getState().applyWeather(event.payload as WeatherReport);
-    });
-    return () => {
-      disposed = true;
-      dispose.then((fn) => fn());
     };
   }, []);
 
@@ -656,7 +651,7 @@ function CalendarApp() {
         <section className="calendar-area" aria-label={t("settings.calendar")}>
         <header className="calendar-header">
           <div className="month-control">
-            <button aria-label={t("calendar.previousMonth")} onClick={() => moveMonth(-1)}>‹</button>
+            <button aria-label={t("calendar.previousMonth")} title={t("calendar.previousMonth")} onClick={() => moveMonth(-1)}>‹</button>
             <select
               className="calendar-select"
               aria-label={t("settings.calendar")}
@@ -665,7 +660,7 @@ function CalendarApp() {
             >
                {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2026, month, 1).toLocaleDateString(inChinese ? "zh-CN" : "en-US", { month: "short" })}</option>)}
             </select>
-            <button aria-label={t("calendar.nextMonth")} onClick={() => moveMonth(1)}>›</button>
+            <button aria-label={t("calendar.nextMonth")} title={t("calendar.nextMonth")} onClick={() => moveMonth(1)}>›</button>
           </div>
           <select
             className="calendar-select calendar-select-year"
@@ -768,6 +763,8 @@ function CalendarApp() {
                      key={day.date.toISOString()}
                      aria-label={`${day.date.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}${showHolidays && day.isWorkday ? ` ${t("calendar.work")}` : ""}${showHolidays && day.isRest ? ` ${t("calendar.rest")}` : ""}`}
                     onClick={() => selectDate(day.date)}
+                    title={`${dateKey(day.date)} ${day.holiday ?? day.label ?? day.lunarLabel}`}
+                    aria-pressed={selectedDay}
                     aria-current={day.isToday ? "date" : undefined}
                   >
                     {day.weekNumber !== undefined && <b className="week-mark">{t("week")}{day.weekNumber}</b>}

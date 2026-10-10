@@ -410,6 +410,55 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 [data-platform="macos"] .aux-shell,
 [data-platform="macos"] .settings-panel { background: var(--mac-panel); }
 
+/* Keep Windows panels compact without changing the native macOS materials. */
+[data-platform="windows"] .calendar-shell { position: relative; padding: 14px; border-radius: 12px; }
+[data-platform="windows"] .aux-shell { border-radius: 12px; }
+[data-platform="windows"] .current-datetime { margin: 0 0 10px; padding: 12px 14px; border-color: var(--border-strong); }
+[data-platform="windows"] .current-time { font-size: 30px; }
+[data-platform="windows"] .current-date { min-width: 0; }
+[data-platform="windows"] .current-date strong { font-variant-numeric: tabular-nums; }
+[data-platform="windows"] .calendar-header { flex: none; }
+[data-platform="windows"] .weekday-row { flex: none; height: 32px; font-size: 12px; }
+[data-platform="windows"] .month-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 3px 1px; min-height: 0; }
+[data-platform="windows"] .day-cell { min-width: 0; min-height: 0; margin: 0; padding: 8px 2px 4px; border-radius: 8px; }
+[data-platform="windows"] .day-cell.selected { background: var(--chip-soft); outline-offset: -2px; }
+[data-platform="windows"] .day-cell.today:not(.selected) .solar-day { color: var(--blue); font-weight: 700; }
+[data-platform="windows"] .lunar-day { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
+[data-platform="windows"] .rest-mark,
+[data-platform="windows"] .work-mark { top: 2px; right: 2px; width: 13px; height: 13px; border-radius: 3px; font-size: 9px; line-height: 1; }
+/* Work marks are nested in the solar label; anchor them to the whole cell. */
+[data-platform="windows"] .solar-day { position: static; }
+[data-platform="windows"] .week-mark { top: 2px; left: 2px; padding: 1px 2px; font-size: 8px; }
+[data-platform="windows"] .settings-panel { padding: 24px; scrollbar-gutter: stable; }
+[data-platform="windows"] .settings-panel,
+[data-platform="windows"] .aux-shell { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+[data-platform="windows"] .settings-description { color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
+[data-platform="windows"] .theme-option { flex-wrap: wrap; }
+[data-platform="windows"] .theme-desc { white-space: normal; }
+[data-platform="windows"] .settings-nav-row .nav-label { min-width: 0; }
+[data-platform="windows"] .settings-nav-row .nav-value,
+[data-platform="windows"] .settings-nav-row .nav-arrow { flex: none; }
+[data-platform="windows"] .world-clock-time strong { font-variant-numeric: tabular-nums; }
+[data-platform="windows"] button:focus-visible,
+[data-platform="windows"] select:focus-visible,
+[data-platform="windows"] input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+[data-platform="windows"] .day-cell:focus-visible { outline: 2px solid var(--text); outline-offset: -4px; }
+
+@media (max-width: 380px) {
+  [data-platform="windows"] .calendar-shell { padding: 10px; }
+  [data-platform="windows"] .calendar-header { gap: 3px; }
+  [data-platform="windows"] .calendar-select { padding-inline: 6px; font-size: 12px; }
+  [data-platform="windows"] .calendar-select-year { width: 74px; }
+  [data-platform="windows"] .month-control > button { width: 28px; }
+  [data-platform="windows"] .toolbar-icon { width: 28px; }
+  [data-platform="windows"] .settings-panel { padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-platform="windows"] *,
+  [data-platform="windows"] *::after { animation: none !important; transition: none !important; }
+}
+
 :root[data-native-glass="true"] {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   --glass-surface: rgba(255, 255, 255, .34);

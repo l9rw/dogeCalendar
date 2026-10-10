@@ -55,8 +55,19 @@ export function WeatherCard() {
 
   useEffect(() => {
     if (!weatherEnabled) return;
-    void loadLocation().then(() => void loadWeather());
-  }, [weatherEnabled, networkEnabled, language, loadLocation, loadWeather]);
+    let active = true;
+    const listener = listen<WeatherReport>("weather-refreshed", (event) => {
+      if (active) applyWeather(event.payload);
+    });
+    // Subscribe before requesting a stale cache's background refresh.
+    void listener.then(() => {
+      if (active) return loadLocation().then(() => { if (active) return loadWeather(); });
+    }).catch(console.error);
+    return () => {
+      active = false;
+      void listener.then((dispose) => dispose()).catch(console.error);
+    };
+  }, [weatherEnabled, networkEnabled, language, loadLocation, loadWeather, applyWeather]);
 
   useEffect(() => {
     if (!weatherEnabled) return;
@@ -71,20 +82,6 @@ export function WeatherCard() {
       window.removeEventListener("focus", onFocus);
     };
   }, [weatherEnabled, loadWeather]);
-
-  // Each detail WebView has its own store and needs the native refresh event.
-  useEffect(() => {
-    if (!weatherEnabled) return;
-    let disposed = false;
-    const unlisten = listen<WeatherReport>("weather-refreshed", (event) => {
-      if (disposed) return;
-      applyWeather(event.payload);
-    });
-    return () => {
-      disposed = true;
-      void unlisten.then((dispose) => dispose()).catch(console.error);
-    };
-  }, [weatherEnabled, applyWeather]);
 
   const data = weather?.data ?? null;
 

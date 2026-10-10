@@ -80,6 +80,40 @@ static SYSTEM_CLOCK_ACTIVE: Mutex<Option<(POINT, std::thread::JoinHandle<bool>)>
     Mutex::new(None);
 
 #[cfg(windows)]
+struct WindowsStartupLock(usize);
+
+#[cfg(windows)]
+impl WindowsStartupLock {
+    fn acquire() -> windows::core::Result<Self> {
+        use windows::Win32::{
+            Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0},
+            System::Threading::{CreateMutexW, WaitForSingleObject, INFINITE},
+        };
+        unsafe {
+            let mutex = CreateMutexW(None, false, windows::core::w!("Local\\dogeCalendar.Startup"))?;
+            let wait = WaitForSingleObject(mutex, INFINITE);
+            if wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED {
+                let error = windows::core::Error::from_win32();
+                let _ = CloseHandle(mutex);
+                return Err(error);
+            }
+            Ok(Self(mutex.0 as usize))
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsStartupLock {
+    fn drop(&mut self) {
+        unsafe {
+            let mutex = windows::Win32::Foundation::HANDLE(self.0 as *mut _);
+            let _ = windows::Win32::System::Threading::ReleaseMutex(mutex);
+            let _ = windows::Win32::Foundation::CloseHandle(mutex);
+        }
+    }
+}
+
+#[cfg(windows)]
 fn close_system_clock(clock_point: POINT, opened: std::thread::JoinHandle<bool>) {
     // The menu action may still be opening the native panel when the next click arrives.
     if opened.join().unwrap_or(false) {
@@ -160,7 +194,9 @@ fn start_mouse_hook(app: tauri::AppHandle) {
     taskbar_clock::start_tracking();
     std::thread::spawn(move || {
         let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) };
-        let Ok(hook) = hook else { return };
+        if let Err(error) = &hook {
+            eprintln!("calendar: failed to install taskbar mouse hook: {error}");
+        }
         if let Some(hwnd) = main_hwnd {
             clock_hover::start(HWND(hwnd as *mut _));
         }
@@ -171,7 +207,9 @@ fn start_mouse_hook(app: tauri::AppHandle) {
                 DispatchMessageW(&message);
             }
         }
-        let _ = unsafe { UnhookWindowsHookEx(hook) };
+        if let Ok(hook) = hook {
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
+        }
     });
 }
 
@@ -1244,7 +1282,25 @@ fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // Serialize plugin initialization: a concurrent launch must not see its
+    // instance mutex before the first process has created the IPC window.
+    #[cfg(windows)]
+    let startup_lock = WindowsStartupLock::acquire().expect("failed to lock Windows startup");
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+        if args.iter().any(|arg| arg == "--autostart") {
+            return;
+        }
+        let panel = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let mut cursor = POINT::default();
+            let _ = unsafe { GetCursorPos(&mut cursor) };
+            show_calendar_at(&panel, cursor.x, cursor.y);
+            let _ = panel.emit("taskbar-calendar-click", ());
+        });
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -1344,7 +1400,9 @@ pub fn run() {
             commands::weather::weather_get,
             commands::weather::weather_clear_cache,
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(windows)]
+            drop(startup_lock);
             let dir = app
                 .path()
                 .app_data_dir()
@@ -1425,6 +1483,10 @@ pub fn run() {
                 // late store could otherwise let a disabled-takeover run briefly
                 // intercept the clock. Bind the State guard before reading it so
                 // the borrow is not tied to a dropped temporary (E0716).
+                //
+                // start_mouse_hook is deferred to after the taskbar-calendar-click
+                // / context listeners below, so the hook never emits before a
+                // handler is registered.
                 {
                     let state = app.state::<AppState>();
                     let takeover = state
@@ -1435,7 +1497,6 @@ pub fn run() {
                         .taskbar_clock_takeover_enabled;
                     TAKEOVER_ENABLED.store(takeover, Ordering::Relaxed);
                 }
-                start_mouse_hook(app.handle().clone());
                 let state = app.state::<AppState>();
                 if let Err(error) = apply_windows_fallback_tray(app.handle(), &state) {
                     eprintln!("calendar: fallback tray unavailable: {error}");
@@ -1487,6 +1548,14 @@ pub fn run() {
                     });
                     return;
                 }
+                #[cfg(windows)]
+                {
+                    // Rust listeners run on the emitter's thread; do not wait
+                    // for window operations inside the low-level mouse hook.
+                    let panel = handle.clone();
+                    let _ = handle.run_on_main_thread(move || toggle_calendar_at(&panel, x as i32, y as i32));
+                }
+                #[cfg(not(windows))]
                 toggle_calendar_at(&handle, x as i32, y as i32);
             });
 
@@ -1521,6 +1590,15 @@ pub fn run() {
                 #[cfg(not(windows))]
                 show_calendar_at(&handle, x as i32, y as i32);
             });
+
+            // The mouse hook is started after the taskbar-calendar-click /
+            // context listeners above so emitted clicks always have a handler.
+            // The takeover flag was already initialized earlier in setup; the
+            // panel visibility was handled by the autostart / no-entry check.
+            #[cfg(windows)]
+            {
+                start_mouse_hook(app.handle().clone());
+            }
 
             #[cfg(debug_assertions)]
             {
@@ -1691,5 +1769,33 @@ mod tests {
         assert!(!refuses_entry_change(false, false, false, EntryTarget::Takeover, true));
         assert!(!refuses_entry_change(false, false, false, EntryTarget::Fallback, true));
         assert!(!refuses_entry_change(false, false, false, EntryTarget::Shortcut, true));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_startup_tests {
+    use super::WindowsStartupLock;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn concurrent_startup_waits_until_instance_ipc_is_ready() {
+        let first = WindowsStartupLock::acquire().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let _lock = WindowsStartupLock::acquire().unwrap();
+            acquired_tx.send(()).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(matches!(
+            acquired_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        drop(first);
+        acquired_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        second.join().unwrap();
+        // Releasing a completed startup must allow a later launch.
+        let _next = WindowsStartupLock::acquire().unwrap();
     }
 }

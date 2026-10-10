@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { shallow } from "zustand/vanilla/shallow";
 import {
   DEFAULT_ACCENT,
   DEFAULT_DARK_BACKGROUND,
@@ -198,21 +199,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
   };
 });
 
-// Auxiliary panels run in separate WebViews and need to observe settings saved by the main window.
-function reloadSettings() {
-  const next = load();
-  const current = useSettingsStore.getState();
-  if (JSON.stringify({ theme: current.theme, appearance: current.appearance, language: current.language, calendar: current.calendar, update: current.update, modules: current.modules }) !== JSON.stringify(next)) {
-    useSettingsStore.setState(next);
-  }
+function syncSettings() {
+  const saved = load();
+  useSettingsStore.setState((current) => {
+    const appearance = shallow(current.appearance, saved.appearance) ? current.appearance : saved.appearance;
+    const calendar = shallow(current.calendar, saved.calendar) ? current.calendar : saved.calendar;
+    const update = shallow(current.update, saved.update) ? current.update : saved.update;
+    const modules = shallow(current.modules, saved.modules) ? current.modules : saved.modules;
+    if (current.theme === saved.theme && current.language === saved.language
+      && appearance === current.appearance && calendar === current.calendar && update === current.update
+      && modules === current.modules) {
+      return current;
+    }
+    return { ...saved, appearance, calendar, update, modules };
+  });
 }
+
+// Auxiliary panels run in separate WebViews and need to observe settings saved by the main window.
 window.addEventListener("storage", (event) => {
-  if (event.key === STORAGE_KEY || event.key === null) reloadSettings();
+  if (event.key === STORAGE_KEY || event.key === null) syncSettings();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) reloadSettings();
+  if (!document.hidden) syncSettings();
 });
-window.addEventListener("focus", reloadSettings);
+window.addEventListener("focus", syncSettings);
 
 export async function syncRuntimePreferences() {
   if (!("__TAURI_INTERNALS__" in window)) return;

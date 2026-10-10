@@ -105,7 +105,15 @@ impl Controller {
                 }
             }
         }
-        for &(hwnd, _) in &self.overlays {
+        for &(hwnd, rect) in &self.overlays {
+            let center = POINT {
+                x: ((i64::from(rect.left) + i64::from(rect.right)) / 2) as i32,
+                y: ((i64::from(rect.top) + i64::from(rect.bottom)) / 2) as i32,
+            };
+            // Restore hidden/covered shields, but leave stable z-order alone.
+            if IsWindowVisible(hwnd).as_bool() && WindowFromPoint(center) == hwnd {
+                continue;
+            }
             if SetWindowPos(
                 hwnd,
                 Some(HWND_TOPMOST),
