@@ -12,6 +12,7 @@ import {
   useSettingsStore,
   syncRuntimePreferences,
   effectiveAppearance,
+  applyAppearance,
   resolveLanguage,
   type Theme,
 } from "./stores/settingsStore";
@@ -21,6 +22,7 @@ import { updateApi } from "./services/ipc";
 import { WeatherCard } from "./components/WeatherCard";
 import { WorldClockStrip } from "./components/WorldClockStrip";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { AppearancePanel } from "./components/AppearancePanel";
 import { StorageNotice } from "./components/StorageNotice";
 import { addCalendarDays, parseCivilDate, daysRemainingInYear } from "./services/dateTools";
 
@@ -88,19 +90,10 @@ function useAppearanceEffect() {
     };
   }, []);
 
-  const { dark, accent, background } = effectiveAppearance(theme, systemDark, appearance);
+  const { dark } = effectiveAppearance(theme, systemDark, appearance);
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-  }, [dark]);
-  useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty("--blue", accent);
-    root.style.setProperty("--chip-soft", `color-mix(in srgb, ${accent} 14%, transparent)`);
-    root.style.setProperty("--shell-border", `color-mix(in srgb, ${accent} 32%, var(--line))`);
-    root.style.setProperty("--surface-3", `color-mix(in srgb, ${accent} 9%, var(--surface-2))`);
-    root.style.setProperty("--shell-bg", background);
-    root.style.setProperty("--glass-opacity", `${appearance.glassOpacity}%`);
-  }, [accent, background, appearance.glassOpacity]);
+    applyAppearance(theme, systemDark, appearance);
+  }, [theme, systemDark, appearance]);
   useEffect(() => {
     document.documentElement.dataset.lang = resolveLanguage(language);
   }, [language]);
@@ -206,7 +199,7 @@ function CurrentDateTime() {
         <span>{t("today")} · {weekday}</span>
         <strong>{current.toLocaleDateString(inChinese ? "zh-CN" : "en-US", { year: "numeric", month: "short", day: "numeric" })}</strong>
       </div>
-      <time className="current-time" dateTime={`${dateKey(current)}T${time}`}>{time}</time>
+      <time className="current-time" dateTime={`${dateKey(current)}T${time}`}>{time.slice(0, 5)}<span className="current-time-seconds">{time.slice(5)}</span></time>
     </section>
   );
 }
@@ -304,10 +297,10 @@ function DetailPanel() {
   );
 }
 
-function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
+function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" | "appearance" }) {
   const { t } = useTranslator();
   const clocksEnabled = useSettingsStore((state) => state.modules.worldClock);
-  useAppearanceEffect();
+  const { dark } = useAppearanceEffect();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented && !event.isComposing) void invoke("close_aux_panel", { panel }).catch(console.error);
@@ -343,6 +336,7 @@ function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
     };
   }, [panel, clocksEnabled]);
   if (panel === "detail") return <DetailPanel />;
+  if (panel === "appearance") return <AppearancePanel dark={dark} onClose={() => void invoke("close_aux_panel", { panel }).catch(console.error)} />;
   return (
     <main className="aux-shell clock-panel" aria-label={t("worldTime")}>
       <button className="popover-close" onClick={() => invoke("close_aux_panel", { panel })} aria-label={t("settings.close")}>×</button>
@@ -353,7 +347,7 @@ function AuxiliaryPanel({ panel }: { panel: "detail" | "clock" }) {
 
 export function App() {
   const panel = new URLSearchParams(window.location.search).get("panel");
-  if (panel === "detail" || panel === "clock") return <AuxiliaryPanel panel={panel} />;
+  if (panel === "detail" || panel === "clock" || panel === "appearance") return <AuxiliaryPanel panel={panel} />;
   return <CalendarApp />;
 }
 
@@ -523,6 +517,13 @@ function CalendarApp() {
     setShowToolbarMenu(false);
   };
 
+  const openAppearance = async () => {
+    await invoke("open_aux_panel", { panel: "appearance" });
+    setShowSettings(false);
+    setInfoPanel(null);
+    setShowToolbarMenu(false);
+  };
+
   const jumpToDate = (event: React.FormEvent) => {
     event.preventDefault();
     if (!jumpResult) { setJumpError(jumpValidation); return; }
@@ -659,6 +660,7 @@ function CalendarApp() {
       ) : showSettings ? (
         <SettingsPanel
           onClose={() => setShowSettings(false)}
+          onOpenAppearance={openAppearance}
           onCheckUpdates={() => void checkUpdates()}
           onIgnoreVersion={ignoreUpdate}
           onInstallUpdate={() => void installUpdate()}

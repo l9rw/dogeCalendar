@@ -27,6 +27,8 @@ static PANEL_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
 static MAIN_PANEL_FOCUSED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static WINDOWS_FOCUS_GENERATION: AtomicU64 = AtomicU64::new(0);
+#[cfg(windows)]
+static WINDOWS_LAYOUT_PENDING: AtomicBool = AtomicBool::new(false);
 // Mirrors the persisted `taskbar_clock_takeover_enabled` flag so the mouse
 // hook and clock tracking can read it without locking the store mutex. When
 // false the hook passes clicks to the OS clock and the hover overlay clears.
@@ -38,6 +40,7 @@ static TAKEOVER_ENABLED: AtomicBool = AtomicBool::new(true);
 const GLOBAL_SHORTCUT: &str = "CmdOrCtrl+Shift+D";
 // A held accelerator toggles once, including platforms with key-repeat events.
 static GLOBAL_SHORTCUT_HELD: AtomicBool = AtomicBool::new(false);
+const PANEL_LABELS: [&str; 4] = ["main", "detail", "clock", "appearance"];
 
 #[cfg(windows)]
 mod clock_hover;
@@ -235,15 +238,112 @@ fn work_area_anchor(x: i32, y: i32) -> (i32, i32) {
     (x, y)
 }
 
+#[cfg(windows)]
+fn windows_calendar_size(config: &tauri::Config, scale: f64) -> Option<tauri::PhysicalSize<u32>> {
+    let main = config
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")?;
+    Some(tauri::LogicalSize::new(main.width, main.height).to_physical(scale))
+}
+
+#[cfg(windows)]
+fn windows_calendar_position(
+    size: tauri::PhysicalSize<u32>,
+    work_area: &tauri::PhysicalRect<i32, u32>,
+) -> tauri::PhysicalPosition<i32> {
+    let left = work_area.position.x;
+    let top = work_area.position.y;
+    tauri::PhysicalPosition::new(
+        (left + work_area.size.width as i32 - size.width as i32 - 8).max(left),
+        (top + work_area.size.height as i32 - size.height as i32 - 4).max(top),
+    )
+}
+
+#[cfg(windows)]
+fn restore_windows_calendar_layout(
+    window: &tauri::WebviewWindow,
+    point: Option<(i32, i32)>,
+) -> tauri::Result<()> {
+    let monitor = match point {
+        Some((x, y)) => window.monitor_from_point(x as f64, y as f64)?,
+        None => window.current_monitor()?,
+    }
+    .or(window.primary_monitor()?);
+
+    if point.is_some() {
+        if let Some(monitor) = &monitor {
+            // Moving first lets Windows adopt the destination DPI before sizing.
+            window.set_position(windows_calendar_position(
+                window.outer_size()?,
+                monitor.work_area(),
+            ))?;
+        }
+    }
+
+    let Some(size) = windows_calendar_size(window.app_handle().config(), window.scale_factor()?)
+    else {
+        return Ok(());
+    };
+    let current = window.inner_size()?;
+    if point.is_none() && (current == size || current.width == 0 || current.height == 0) {
+        return Ok(());
+    }
+    // RDP can leave the old physical bounds in place after the WebView adopts a
+    // new DPI. Reassert the configured logical size, not the stale client size.
+    if current != size {
+        window.set_size(size)?;
+    }
+    if let Some(monitor) = monitor {
+        let position = windows_calendar_position(window.outer_size()?, monitor.work_area());
+        if window.outer_position()? != position {
+            window.set_position(position)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn schedule_windows_calendar_layout(app: &tauri::AppHandle) {
+    if WINDOWS_LAYOUT_PENDING.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let handle = app.clone();
+        // run_on_main_thread executes inline when already on the UI thread.
+        // Dispatch from a worker so Tao finishes WM_DPICHANGED before we resize.
+        if let Err(error) = app.run_on_main_thread(move || {
+            if let Some(window) = handle.get_webview_window("main") {
+                if let Err(error) = restore_windows_calendar_layout(&window, None) {
+                    eprintln!("calendar: failed to restore Windows layout: {error}");
+                }
+            }
+            WINDOWS_LAYOUT_PENDING.store(false, Ordering::Relaxed);
+        }) {
+            WINDOWS_LAYOUT_PENDING.store(false, Ordering::Relaxed);
+            eprintln!("calendar: failed to schedule Windows layout: {error}");
+        }
+    });
+}
+
 fn show_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
     if let Some(window) = app.get_webview_window("main") {
-        let size = window.outer_size().unwrap_or_default();
-        let (anchor_x, anchor_y) = work_area_anchor(x, y);
-        let pos = tauri::PhysicalPosition::new(
-            anchor_x - size.width as i32 - 8,
-            anchor_y - size.height as i32 - 4,
-        );
-        let _ = window.set_position(pos);
+        #[cfg(windows)]
+        if let Err(error) = restore_windows_calendar_layout(&window, Some((x, y))) {
+            eprintln!("calendar: failed to prepare Windows layout: {error}");
+        }
+        #[cfg(not(windows))]
+        {
+            let size = window.outer_size().unwrap_or_default();
+            let (anchor_x, anchor_y) = work_area_anchor(x, y);
+            let pos = tauri::PhysicalPosition::new(
+                anchor_x - size.width as i32 - 8,
+                anchor_y - size.height as i32 - 4,
+            );
+            let _ = window.set_position(pos);
+        }
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -252,7 +352,7 @@ fn show_calendar_at(app: &tauri::AppHandle, x: i32, y: i32) {
 fn hide_main_panel(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     MAIN_PANEL_FOCUSED.store(false, Ordering::Relaxed);
-    for label in ["main", "detail", "clock"] {
+    for label in PANEL_LABELS {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.hide();
         }
@@ -1118,10 +1218,53 @@ fn hide_calendar(app: tauri::AppHandle) {
 #[tauri::command]
 fn show_update_panel(app: tauri::AppHandle) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("日历窗口不可用")?;
+    #[cfg(windows)]
+    restore_windows_calendar_layout(&window, None).map_err(|error| error.to_string())?;
     window.center().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn appearance_panel_layout(
+    main_pos: tauri::LogicalPosition<f64>,
+    main_size: tauri::LogicalSize<f64>,
+    bounds: (f64, f64, f64, f64),
+) -> Option<(tauri::LogicalPosition<f64>, tauri::LogicalPosition<f64>, f64)> {
+    let (left, top, right, bottom) = bounds;
+    let gap = 12.0;
+    let width = (right - left - main_size.width - gap).clamp(320.0, 380.0);
+    let y = main_pos.y.clamp(top, (bottom - main_size.height).max(top));
+    let mut main_x = main_pos.x;
+    let mut x = if main_x - width - gap >= left {
+        main_x - width - gap
+    } else if main_x + main_size.width + gap + width <= right {
+        main_x + main_size.width + gap
+    } else if right - left >= main_size.width + gap + width {
+        // Keep the preview unobscured on narrow work areas by shifting the pair.
+        main_x = right - main_size.width;
+        main_x - width - gap
+    } else if main_pos.y - main_size.height - gap >= top {
+        return Some((
+            main_pos,
+            tauri::LogicalPosition::new(main_x, main_pos.y - main_size.height - gap),
+            width,
+        ));
+    } else if main_pos.y + main_size.height * 2.0 + gap <= bottom {
+        return Some((
+            main_pos,
+            tauri::LogicalPosition::new(main_x, main_pos.y + main_size.height + gap),
+            width,
+        ));
+    } else {
+        return None;
+    };
+    x = x.clamp(left, (right - width).max(left));
+    Some((
+        tauri::LogicalPosition::new(main_x, y),
+        tauri::LogicalPosition::new(x, y),
+        width,
+    ))
 }
 
 #[tauri::command]
@@ -1130,9 +1273,10 @@ async fn open_aux_panel(
     panel: String,
     date: Option<String>,
 ) -> Result<(), String> {
-    let (label, title, width) = match panel.as_str() {
+    let (label, title, mut width) = match panel.as_str() {
         "detail" => ("detail", "日期详情", 350.0),
         "clock" => ("clock", "世界时间", 520.0),
+        "appearance" => ("appearance", "外观", 380.0),
         _ => return Err("未知面板".into()),
     };
     let main = app.get_webview_window("main").ok_or("日历窗口不可用")?;
@@ -1152,10 +1296,11 @@ async fn open_aux_panel(
         .height;
     let (left, top, right, bottom) =
         if let Some(monitor) = main.current_monitor().map_err(|error| error.to_string())? {
-            #[cfg(target_os = "macos")]
-            let (position, size) = (monitor.work_area().position, monitor.work_area().size);
-            #[cfg(not(target_os = "macos"))]
-            let (position, size) = (*monitor.position(), *monitor.size());
+            let (position, size) = if label == "appearance" || cfg!(target_os = "macos") {
+                (monitor.work_area().position, monitor.work_area().size)
+            } else {
+                (*monitor.position(), *monitor.size())
+            };
             #[cfg(target_os = "macos")]
             let scale = monitor.scale_factor();
             let pos = position.to_logical::<f64>(scale);
@@ -1169,13 +1314,40 @@ async fn open_aux_panel(
                 main_pos.y + main_size.height,
             )
         };
-    let x = if main_pos.x - width - 12.0 >= left {
-        main_pos.x - width - 12.0
+    let (x, y) = if label == "appearance" {
+        let (preview_pos, panel_pos, panel_width) = appearance_panel_layout(
+            main_pos,
+            tauri::LogicalSize::new(main_size.width, height),
+            (left, top, right, bottom),
+        )
+        .ok_or("屏幕空间不足，无法并排预览外观")?;
+        if preview_pos != main_pos {
+            main.set_position(preview_pos)
+                .map_err(|error| error.to_string())?;
+        }
+        width = panel_width;
+        (panel_pos.x, panel_pos.y)
     } else {
-        main_pos.x + main_size.width + 12.0
+        let x = if main_pos.x - width - 12.0 >= left {
+            main_pos.x - width - 12.0
+        } else {
+            main_pos.x + main_size.width + 12.0
+        }
+        .clamp(left, (right - width).max(left));
+        let y = main_pos.y.clamp(top, (bottom - height).max(top));
+        (x, y)
+    };
+    // These panels share one adjacent slot. Appearance is the active editor.
+    let other_panels: &[&str] = if label == "appearance" {
+        &["detail", "clock"]
+    } else {
+        &["appearance"]
+    };
+    for other in other_panels {
+        if let Some(window) = app.get_webview_window(other) {
+            window.hide().map_err(|error| error.to_string())?;
+        }
     }
-    .clamp(left, (right - width).max(left));
-    let y = main_pos.y.clamp(top, (bottom - height).max(top));
     if let Some(window) = app.get_webview_window(label) {
         window
             .set_size(tauri::LogicalSize::new(width, height))
@@ -1197,13 +1369,18 @@ async fn open_aux_panel(
                 window.show().map_err(|error| error.to_string())?;
                 window.set_focus().map_err(|error| error.to_string())?;
             }
+        } else if label == "appearance" {
+            #[cfg(target_os = "macos")]
+            show_macos_aux_panel(window, false).await?;
+            #[cfg(not(target_os = "macos"))]
+            window.set_focus().map_err(|error| error.to_string())?;
         }
         return Ok(());
     }
     let url = if label == "detail" {
         format!("?panel=detail&date={}", date.unwrap_or_default())
     } else {
-        "?panel=clock".to_string()
+        format!("?panel={label}")
     };
     let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
         .title(title)
@@ -1212,6 +1389,8 @@ async fn open_aux_panel(
         .resizable(false)
         .decorations(false)
         .transparent(true)
+        .always_on_top(label == "appearance")
+        .shadow(label != "appearance")
         .skip_taskbar(true)
         .accept_first_mouse(true)
         .visible(!cfg!(target_os = "macos"))
@@ -1242,6 +1421,17 @@ async fn show_macos_aux_panel(
             if newly_created {
                 configure_macos_panel(&window)?;
             }
+            if newly_created && window.label() == "appearance" {
+                let native = window.ns_window()? as *mut objc2_app_kit::NSWindow;
+                let parent = main.ns_window()? as *mut objc2_app_kit::NSWindow;
+                unsafe {
+                    // The editor follows the preview into full-screen Spaces but can be key.
+                    (*parent).addChildWindow_ordered(
+                        &*native,
+                        objc2_app_kit::NSWindowOrderingMode::Above,
+                    );
+                }
+            }
             if window.label() == "detail" {
                 let native = window.ns_window()? as *mut objc2_app_kit::NSWindow;
                 let parent = main.ns_window()? as *mut objc2_app_kit::NSWindow;
@@ -1271,10 +1461,17 @@ async fn show_macos_aux_panel(
 
 #[tauri::command]
 fn close_aux_panel(app: tauri::AppHandle, panel: String) -> Result<(), String> {
-    if panel != "detail" && panel != "clock" {
+    if panel == "main" || !PANEL_LABELS.contains(&panel.as_str()) {
         return Err("未知面板".into());
     }
     if let Some(window) = app.get_webview_window(&panel) {
+        if panel == "appearance" {
+            if let Some(main) = app.get_webview_window("main") {
+                if main.is_visible().map_err(|error| error.to_string())? {
+                    main.set_focus().map_err(|error| error.to_string())?;
+                }
+            }
+        }
         window.hide().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -1624,6 +1821,8 @@ pub fn run() {
                     api.prevent_close();
                     if window.label() == "main" {
                         hide_main_panel(window.app_handle());
+                    } else if window.label() == "appearance" {
+                        let _ = close_aux_panel(window.app_handle().clone(), "appearance".into());
                     } else {
                         let _ = window.hide();
                     }
@@ -1638,6 +1837,15 @@ pub fn run() {
                 #[cfg(windows)]
                 tauri::WindowEvent::Focused(true) => {
                     WINDOWS_FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
+                    if window.label() == "main" {
+                        schedule_windows_calendar_layout(window.app_handle());
+                    }
+                }
+                #[cfg(windows)]
+                tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Resized(_)
+                    if window.label() == "main" =>
+                {
+                    schedule_windows_calendar_layout(window.app_handle());
                 }
                 tauri::WindowEvent::Focused(false) => {
                     #[cfg(target_os = "macos")]
@@ -1654,7 +1862,7 @@ pub fn run() {
                                     return;
                                 }
                                 let panel_focused =
-                                    ["main", "detail", "clock"].iter().any(|label| {
+                                    PANEL_LABELS.iter().any(|label| {
                                         window
                                             .app_handle()
                                             .get_webview_window(label)
@@ -1680,7 +1888,7 @@ pub fn run() {
                                     return;
                                 }
                                 let panel_focused =
-                                    ["main", "detail", "clock"].iter().any(|label| {
+                                    PANEL_LABELS.iter().any(|label| {
                                         panel_app.get_webview_window(label).is_some_and(|panel| {
                                             panel.is_focused().unwrap_or(false)
                                         })
@@ -1702,7 +1910,7 @@ pub fn run() {
                     }
                     #[cfg(all(not(target_os = "macos"), not(windows)))]
                     {
-                        let aux_visible = ["detail", "clock"].iter().any(|label| {
+                        let aux_visible = PANEL_LABELS[1..].iter().any(|label| {
                             window
                                 .app_handle()
                                 .get_webview_window(label)
@@ -1724,9 +1932,160 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+#[cfg(test)]
+mod appearance_tests {
+    use super::{appearance_panel_layout, PANEL_LABELS};
+    use tauri::{LogicalPosition, LogicalSize};
+
+    #[test]
+    fn appearance_opens_beside_the_preview_and_uses_the_work_area() {
+        let main = LogicalPosition::new(1492.0, 526.0);
+        let (preview, panel, width) = appearance_panel_layout(
+            main,
+            LogicalSize::new(420.0, 510.0),
+            (0.0, 0.0, 1920.0, 1040.0),
+        )
+        .unwrap();
+        assert_eq!(preview, main);
+        assert_eq!(width, 380.0);
+        assert_eq!(panel, LogicalPosition::new(1100.0, 526.0));
+        assert!(panel.x + width < preview.x);
+    }
+
+    #[test]
+    fn appearance_uses_the_right_side_when_main_is_at_the_left_edge() {
+        let main = LogicalPosition::new(-1912.0, -100.0);
+        let (preview, panel, width) = appearance_panel_layout(
+            main,
+            LogicalSize::new(420.0, 510.0),
+            (-1920.0, -200.0, 0.0, 840.0),
+        )
+        .unwrap();
+        assert_eq!(preview, main);
+        assert_eq!(panel, LogicalPosition::new(-1480.0, -100.0));
+        assert_eq!(width, 380.0);
+    }
+
+    #[test]
+    fn narrow_work_areas_shrink_the_editor_without_covering_the_calendar() {
+        let (preview, panel, width) = appearance_panel_layout(
+            LogicalPosition::new(200.0, 90.0),
+            LogicalSize::new(420.0, 510.0),
+            (0.0, 0.0, 800.0, 600.0),
+        )
+        .unwrap();
+        assert_eq!(preview, LogicalPosition::new(380.0, 90.0));
+        assert_eq!(panel, LogicalPosition::new(0.0, 90.0));
+        assert_eq!(width, 368.0);
+        assert_eq!(panel.x + width + 12.0, preview.x);
+    }
+
+    #[test]
+    fn portrait_work_areas_can_keep_the_editor_above_the_calendar() {
+        let main = LogicalPosition::new(60.0, 680.0);
+        let (preview, panel, width) = appearance_panel_layout(
+            main,
+            LogicalSize::new(420.0, 510.0),
+            (0.0, 0.0, 600.0, 1200.0),
+        )
+        .unwrap();
+        assert_eq!(preview, main);
+        assert_eq!(width, 320.0);
+        assert_eq!(panel, LogicalPosition::new(60.0, 158.0));
+        assert!(panel.y + 510.0 < main.y);
+    }
+
+    #[test]
+    fn insufficient_work_area_never_opens_the_editor_over_the_preview() {
+        assert!(appearance_panel_layout(
+            LogicalPosition::new(10.0, 10.0),
+            LogicalSize::new(420.0, 510.0),
+            (0.0, 0.0, 600.0, 600.0),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn panel_lifecycle_and_webview_permissions_include_appearance() {
+        assert!(PANEL_LABELS.contains(&"appearance"));
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        for label in PANEL_LABELS {
+            assert!(capability["windows"].as_array().unwrap().iter().any(|value| value == label));
+        }
+    }
+}
+
 #[cfg(all(windows, test))]
 mod tests {
-    use super::{no_entry_available, refuses_entry_change, EntryTarget};
+    use super::{
+        no_entry_available, refuses_entry_change, windows_calendar_position,
+        windows_calendar_size, EntryTarget,
+    };
+
+    #[test]
+    fn calendar_size_preserves_configured_logical_dimensions_across_dpi_changes() {
+        let config: tauri::Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for (scale, width, height) in [
+            (1.0, 420, 510),
+            (1.25, 525, 638),
+            (1.5, 630, 765),
+            (2.0, 840, 1020),
+            (1.0, 420, 510),
+        ] {
+            assert_eq!(
+                windows_calendar_size(&config, scale),
+                Some(tauri::PhysicalSize::new(width, height)),
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_size_uses_config_instead_of_stale_window_bounds() {
+        let mut config: tauri::Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let main = config
+            .app
+            .windows
+            .iter_mut()
+            .find(|window| window.label == "main")
+            .unwrap();
+        main.width = 440.0;
+        main.height = 530.0;
+        assert_eq!(
+            windows_calendar_size(&config, 1.25),
+            Some(tauri::PhysicalSize::new(550, 663)),
+        );
+        config.app.windows.clear();
+        assert_eq!(windows_calendar_size(&config, 1.25), None);
+    }
+
+    #[test]
+    fn calendar_position_uses_resized_bounds_and_the_target_work_area() {
+        let work_area = tauri::PhysicalRect {
+            position: tauri::PhysicalPosition::new(-1920, -200),
+            size: tauri::PhysicalSize::new(1920, 1040),
+        };
+        for size in [
+            tauri::PhysicalSize::new(420, 510),
+            tauri::PhysicalSize::new(525, 638),
+        ] {
+            let position = windows_calendar_position(size, &work_area);
+            assert_eq!(position.x + size.width as i32, -8);
+            assert_eq!(position.y + size.height as i32, 836);
+        }
+    }
+
+    #[test]
+    fn calendar_position_keeps_the_origin_visible_in_a_small_remote_work_area() {
+        let work_area = tauri::PhysicalRect {
+            position: tauri::PhysicalPosition::new(1920, 40),
+            size: tauri::PhysicalSize::new(800, 600),
+        };
+        assert_eq!(
+            windows_calendar_position(tauri::PhysicalSize::new(840, 1020), &work_area),
+            work_area.position,
+        );
+    }
 
     #[test]
     fn no_entry_available_only_when_all_three_off() {

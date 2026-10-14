@@ -80,6 +80,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .aux-shell { position: relative; width: 100%; height: 100vh; overflow-y: auto; border: 1px solid var(--shell-border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-panel); }
 .aux-shell.detail-panel { padding: 18px 18px 20px; }
 .aux-shell.clock-panel { padding: 14px; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+.aux-shell.appearance-panel { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.aux-shell.appearance-panel > .settings-header { flex: none; align-items: center; gap: 12px; margin: 0; padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+.appearance-panel .settings-header h2 { font-size: 20px; line-height: 1.4; }
+.appearance-content { flex: 1; min-height: 0; padding: 10px 20px 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+.appearance-preview-hint { margin: 0; font-size: 12px; line-height: 1.6; }
 .clock-panel .world-clock-strip { margin-top: 0; padding: 0; border: 0; background: transparent; }
 .clock-panel .world-clock-header { padding-right: 36px; }
 
@@ -105,7 +110,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .info-panel .info-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .info-panel .info-actions > :last-child { grid-column: 1 / -1; }
 .info-button { flex: 1; min-height: 38px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); cursor: pointer; font-size: 12px; }
-.info-button.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+.info-button.primary { color: var(--on-accent, #fff); border-color: var(--blue); background: var(--blue); }
 .info-button:disabled { opacity: .6; cursor: default; }
 .settings-section { margin-top: 22px; display: grid; gap: 10px; }
 .settings-section .section-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
@@ -119,6 +124,21 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-option .theme-dot.system { background: linear-gradient(90deg, #fff 50%, #171717 50%); }
 .theme-option .theme-label { font-weight: 600; }
 .theme-option .theme-desc { margin-left: auto; color: var(--muted); font-size: 12px; }
+.color-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.color-theme-option { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.color-theme-option:first-child { grid-column: 1 / -1; }
+.color-theme-option:hover { border-color: var(--blue); }
+.color-theme-option[aria-pressed="true"] { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+.color-theme-preview { display: grid; grid-template-columns: repeat(3, 1fr); align-content: center; gap: 4px; flex: none; width: 40px; height: 36px; padding: 6px; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 6px; }
+.color-theme-preview i { height: 8px; border-radius: 2px; background: currentColor; }
+.color-theme-preview i:nth-child(2) { opacity: .55; }
+.color-theme-preview i:nth-child(3) { opacity: .25; }
+.color-theme-copy { display: grid; min-width: 0; gap: 4px; }
+.color-theme-copy strong { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.color-theme-copy small { padding: 2px 5px; border-radius: 4px; background: var(--theme-tint); color: var(--theme-accent); font-size: 10px; font-weight: 400; }
+.color-theme-copy > span { color: var(--text-soft); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.color-theme-hint { font-size: 11px; line-height: 1.5; }
+.color-theme-reset { justify-self: start; font-size: 12px; }
 .date-format-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .date-format-options .theme-option { padding: 9px 10px; flex-wrap: wrap; gap: 3px 8px; font-size: 12px; }
 .date-format-options .theme-desc { margin-left: 0; overflow-wrap: anywhere; }
@@ -255,7 +275,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .mini-weekdays { margin: 8px 0 4px; color: var(--muted); font-size: 10px; }
 .mini-month-grid button { min-width: 0; padding: 0; border: 0; border-radius: 50%; color: var(--text-soft); background: transparent; font-size: 10px; cursor: pointer; }
 .mini-month-grid .muted { color: var(--text-faint); }
-.mini-month-grid .today { color: #fff; background: var(--blue); }
+.mini-month-grid .today { color: var(--on-accent, #fff); background: var(--blue); }
 
 @media (max-width: 560px) {
   .calendar-layout { grid-template-columns: 1fr; }
@@ -392,7 +412,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .location-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .location-input { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); background: var(--surface); font-size: 13px; }
 .location-input-wide { grid-column: 1 / -1; }
-.location-apply { grid-column: 1 / -1; height: 36px; border: 0; border-radius: 9px; color: #fff; background: var(--blue); font-size: 13px; font-weight: 600; cursor: pointer; }
+.location-apply { grid-column: 1 / -1; height: 36px; border: 0; border-radius: 9px; color: var(--on-accent, #fff); background: var(--blue); font-size: 13px; font-weight: 600; cursor: pointer; }
 .location-apply:disabled { opacity: .55; cursor: default; }
 .location-actions { display: flex; gap: 10px; margin-top: 12px; }
 .location-action { flex: 1; height: 34px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text-soft); background: var(--surface); font-size: 12px; cursor: pointer; }
@@ -416,7 +436,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px; }
 .settings-toggle-row .toggle-label { color: var(--text); font-size: 14px; }
 .settings-toggle { position: relative; flex: none; width: 42px; height: 24px; border: 0; border-radius: 999px; background: var(--border-strong); cursor: pointer; transition: background .15s; }
-.settings-toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.settings-toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--on-accent, #fff); transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
 .settings-toggle[aria-checked="true"] { background: var(--blue); }
 .settings-toggle[aria-checked="true"]::after { transform: translateX(18px); }
 .settings-toggle:disabled { opacity: .5; cursor: not-allowed; }
@@ -464,48 +484,159 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 [data-platform="macos"] .aux-shell,
 [data-platform="macos"] .settings-panel { background: var(--mac-panel); }
 
-/* Keep Windows panels compact without changing the native macOS materials. */
-[data-platform="windows"] .calendar-shell { position: relative; padding: 14px; border-radius: 12px; }
-[data-platform="windows"] .aux-shell { border-radius: 12px; }
-[data-platform="windows"] .current-datetime { margin: 0 0 10px; padding: 12px 14px; border-color: var(--border-strong); }
-[data-platform="windows"] .current-time { font-size: 30px; }
-[data-platform="windows"] .current-date { min-width: 0; }
-[data-platform="windows"] .current-date strong { font-variant-numeric: tabular-nums; }
-[data-platform="windows"] .calendar-header { flex: none; }
-[data-platform="windows"] .weekday-row { flex: none; height: 32px; font-size: 12px; }
-[data-platform="windows"] .month-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 3px 1px; min-height: 0; }
-[data-platform="windows"] .day-cell { min-width: 0; min-height: 0; margin: 0; padding: 4px 2px 8px; border-radius: 8px; }
-[data-platform="windows"] .day-cell.selected { background: var(--chip-soft); outline-offset: -2px; }
-[data-platform="windows"] .day-cell.today:not(.selected) .solar-day { color: var(--blue); font-weight: 700; }
-[data-platform="windows"] .lunar-day { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
+/* Shared Windows layout. Palette tokens are defined separately in themes.css. */
+:root[data-platform="windows"] {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  color-scheme: light;
+  --surface: var(--shell-bg, #ffffff);
+}
+:root[data-platform="windows"][data-theme="dark"] {
+  color-scheme: dark;
+}
+[data-platform="windows"] .calendar-shell { position: relative; padding: 18px 18px 12px; border-color: var(--border-strong); border-radius: 14px; box-shadow: none; }
+[data-platform="windows"] .aux-shell { border-color: var(--border-strong); border-radius: 14px; box-shadow: none; }
+[data-platform="windows"] .current-datetime { flex: none; min-height: 72px; margin: 0 0 8px; padding: 0 2px 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+[data-platform="windows"] .current-time { color: var(--time-ink); font-size: 34px; font-weight: 600; letter-spacing: -.045em; line-height: 1.2; }
+[data-platform="windows"] .current-time-seconds { margin-left: 2px; color: var(--text-dim); font-size: 17px; font-weight: 400; letter-spacing: 0; }
+[data-platform="windows"] .current-date { min-width: 0; gap: 5px; }
+[data-platform="windows"] .current-date span { color: var(--text-dim); font-size: 11px; }
+[data-platform="windows"] .current-date strong { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+[data-platform="windows"] .calendar-header { flex: none; gap: 8px; height: 46px; padding: 0 0 6px; }
+[data-platform="windows"] .month-control { gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+[data-platform="windows"] .month-control > button { width: 28px; height: 30px; border-radius: 6px; color: var(--text-soft); }
+[data-platform="windows"] .calendar-select { height: 30px; padding-inline: 7px; border-color: transparent; border-radius: 6px; background: transparent; font-size: 13px; font-weight: 600; }
+[data-platform="windows"] .calendar-select option { color: var(--text); background: var(--surface); }
+[data-platform="windows"] .calendar-select-year { width: 82px; }
+[data-platform="windows"] .calendar-select:hover { border-color: var(--border-strong); background: var(--surface); }
+[data-platform="windows"] .calendar-toolbar { gap: 3px; }
+[data-platform="windows"] .toolbar-icon { color: var(--text-soft); }
+[data-platform="windows"] .toolbar-menu-toggle { margin-left: 0; }
+[data-platform="windows"] .toolbar-icon:hover,
+[data-platform="windows"] .month-control > button:hover { color: var(--theme-accent); background: var(--theme-tint); }
+[data-platform="windows"] .toolbar-icon[aria-pressed="true"] { color: var(--theme-accent); border-color: var(--line); background: var(--theme-tint); }
+[data-platform="windows"] .toolbar-menu { min-width: 184px; padding: 5px; border-color: var(--line); border-radius: 10px; }
+[data-platform="windows"] .toolbar-menu-item { min-height: 35px; border-radius: 6px; font-size: 12px; }
+[data-platform="windows"] .toolbar-menu-item:hover,
+[data-platform="windows"] .toolbar-menu-item:focus-visible { color: var(--theme-accent); background: var(--theme-tint); }
+[data-platform="windows"] .weekday-row { flex: none; height: 30px; color: var(--text-dim); font-size: 11px; font-weight: 500; }
+[data-platform="windows"] .weekend-heading { color: var(--red); }
+[data-platform="windows"] .month-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 3px 0; min-height: 0; }
+[data-platform="windows"] .calendar-card:has(.week-mark) .weekday-row,
+[data-platform="windows"] .month-grid:has(.week-mark) { padding-left: 24px; }
+[data-platform="windows"] .day-cell { display: flex; flex-direction: column; justify-content: center; min-width: 0; min-height: 0; margin: 0; padding: 2px 2px 3px; border-radius: 8px; transition: background .12s, box-shadow .12s; }
+[data-platform="windows"] .day-cell:hover { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
+[data-platform="windows"] .day-cell.selected { outline: 0; background: var(--theme-tint); box-shadow: inset 0 0 0 1.5px var(--theme-accent); }
+[data-platform="windows"] .day-cell.today { background: var(--theme-accent); box-shadow: none; }
+[data-platform="windows"] .day-cell.today .solar-day { color: var(--on-accent); font-weight: 650; }
+[data-platform="windows"] .day-cell.today .lunar-day { color: var(--on-accent); }
+[data-platform="windows"] .day-cell.today:hover { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--surface) 40%, transparent); }
+[data-platform="windows"] .day-cell.today.selected { outline: 1px solid var(--theme-accent); outline-offset: -1px; box-shadow: inset 0 0 0 2px var(--surface); }
+[data-platform="windows"] .lunar-day { min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 14px; }
 [data-platform="windows"] .rest-mark,
-[data-platform="windows"] .work-mark { top: 2px; right: 2px; width: 13px; height: 13px; border-radius: 3px; font-size: 9px; line-height: 1; }
+[data-platform="windows"] .work-mark { top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 3px; font-size: 9px; font-weight: 600; line-height: 1; }
+[data-platform="windows"] .rest-mark { color: var(--red); background: color-mix(in srgb, var(--red) 13%, var(--surface)); }
+[data-platform="windows"] .work-mark { color: var(--text-soft); background: color-mix(in srgb, var(--text) 10%, var(--surface)); }
 /* Work marks are nested in the solar label; anchor them to the whole cell. */
-[data-platform="windows"] .solar-day { position: static; }
-[data-platform="windows"] .week-mark { top: 2px; left: 2px; padding: 1px 2px; font-size: 8px; }
-[data-platform="windows"] .settings-panel { padding: 24px; scrollbar-gutter: stable; }
+[data-platform="windows"] .solar-day { position: static; font-weight: 600; line-height: 20px; font-variant-numeric: tabular-nums; }
+[data-platform="windows"] .day-cell.muted .solar-day { font-weight: 400; }
+[data-platform="windows"] .week-mark { top: 50%; left: -24px; width: 20px; padding: 0; transform: translateY(-50%); color: var(--text-dim); background: transparent; font-size: 9px; font-weight: 400; line-height: 12px; pointer-events: none; }
+[data-platform="windows"] .calendar-countdown-summary { gap: 3px 10px; margin-top: 9px; padding: 9px 1px 0; border-top: 1px solid var(--line); font-size: 11px; }
+[data-platform="windows"] .calendar-countdown-holiday { color: var(--theme-accent); font-weight: 600; }
+[data-platform="windows"] .calendar-countdown-holiday:hover { text-decoration: underline; text-underline-offset: 3px; }
+[data-platform="windows"] .year-grid { gap: 8px; padding: 3px 1px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+[data-platform="windows"] .mini-month { background: var(--surface-2); }
+[data-platform="windows"] .mini-month-title { color: var(--theme-accent); font-size: 12px; font-weight: 600; }
+[data-platform="windows"] .mini-month-grid .today { color: var(--on-accent); background: var(--theme-accent); }
+[data-platform="windows"] .settings-panel { padding: 20px; background: var(--surface-2); scrollbar-gutter: stable; }
 [data-platform="windows"] .settings-panel,
 [data-platform="windows"] .aux-shell { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+[data-platform="windows"] .settings-header { align-items: center; gap: 12px; margin-bottom: 18px; }
+[data-platform="windows"] .settings-header h2 { gap: 8px; font-size: 20px; font-weight: 650; line-height: 1.4; }
+[data-platform="windows"] .settings-header .settings-icon { width: 20px; height: 20px; color: var(--theme-accent); }
+[data-platform="windows"] .settings-close { flex: none; width: 30px; height: 30px; background: var(--surface); color: var(--text-dim); border-radius: 8px; font-size: 20px; }
 [data-platform="windows"] .settings-description { color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
-[data-platform="windows"] .theme-option { flex-wrap: wrap; }
+[data-platform="windows"] .settings-section { margin-top: 18px; gap: 8px; }
+[data-platform="windows"] .settings-section .section-label { color: var(--text-soft); font-size: 11px; letter-spacing: .04em; }
+[data-platform="windows"] .theme-options { gap: 7px; }
+[data-platform="windows"] .theme-option { flex-wrap: wrap; padding: 10px 12px; border-color: var(--line); border-radius: 8px; font-size: 13px; }
+[data-platform="windows"] .theme-option.active { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-tint); }
+[data-platform="windows"] .theme-option:hover { border-color: var(--theme-accent); }
 [data-platform="windows"] .theme-desc { white-space: normal; }
-[data-platform="windows"] .settings-nav-row .nav-label { min-width: 0; }
+[data-platform="windows"] .settings-nav { gap: 6px; margin-top: 0; }
+[data-platform="windows"] .settings-nav-row { min-height: 46px; padding: 10px 12px; border-color: var(--line); border-radius: 8px; font-size: 13px; }
+[data-platform="windows"] .settings-nav-row:hover { background: var(--theme-tint); border-color: var(--border-strong); }
+[data-platform="windows"] .settings-nav-row > .settings-icon { color: var(--theme-accent); }
+[data-platform="windows"] .settings-nav-row .nav-label { min-width: 0; font-weight: 500; }
 [data-platform="windows"] .settings-nav-row .nav-value,
 [data-platform="windows"] .settings-nav-row .nav-arrow { flex: none; }
-[data-platform="windows"] .world-clock-time strong { font-variant-numeric: tabular-nums; }
+[data-platform="windows"] .settings-toggle-row .toggle-label { font-size: 13px; }
+[data-platform="windows"] .settings-toggle[aria-checked="true"] { background: var(--theme-accent); }
+[data-platform="windows"] .settings-toggle[aria-checked="true"]::after { background: var(--on-accent); }
+[data-platform="windows"] .color-grid { gap: 6px; }
+[data-platform="windows"] .color-swatch { border-radius: 6px; }
+[data-platform="windows"] .color-swatch.active { outline-color: var(--theme-accent); }
+[data-platform="windows"] .info-button.primary,
+[data-platform="windows"] .location-apply { color: var(--on-accent); border-color: var(--theme-accent); background: var(--theme-accent); }
+[data-platform="windows"] .date-jump-modes .info-button[aria-pressed="true"] { color: var(--theme-accent); border-color: var(--theme-accent); background: var(--theme-tint); }
+[data-platform="windows"] .date-jump-result strong { color: var(--theme-accent); }
+[data-platform="windows"] .aux-shell.detail-panel { padding: 20px; }
+[data-platform="windows"] .detail-topline { gap: 8px; }
+[data-platform="windows"] .detail-title { color: var(--text-soft); font-size: 12px; }
+[data-platform="windows"] .today-badge { color: var(--theme-accent); background: var(--theme-tint); font-size: 10px; }
+[data-platform="windows"] .detail-date { gap: 16px; margin-top: 20px; }
+[data-platform="windows"] .detail-day { color: var(--time-ink); font-size: 60px; font-weight: 500; }
+[data-platform="windows"] .detail-lunar { margin: 12px 0 18px; }
+[data-platform="windows"] .detail-section .section-label { color: var(--theme-accent); }
+[data-platform="windows"] .detail-section-muted .section-label { color: var(--text-dim); }
+[data-platform="windows"] .weather-card { background: var(--surface-2); border-color: var(--line); border-radius: 10px; }
+[data-platform="windows"] .weather-place { color: var(--theme-accent); }
+[data-platform="windows"] .aux-shell.clock-panel { padding: 14px 16px; }
+[data-platform="windows"] .world-clock-header { margin-bottom: 9px; }
+[data-platform="windows"] .world-clock-title { color: var(--text-soft); letter-spacing: .02em; }
+[data-platform="windows"] .world-clock-item { padding: 8px 12px; gap: 2px; border-color: var(--line); border-radius: 10px; }
+[data-platform="windows"] .world-clock-item::before { background: var(--theme-tint); }
+[data-platform="windows"] .world-clock-item[data-daytime="false"]::before { background: var(--surface-2); }
+[data-platform="windows"] .world-clock-time strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+[data-platform="windows"] .world-clock-format.active { color: var(--theme-accent); border-color: var(--border-strong); background: var(--theme-tint); }
 [data-platform="windows"] button:focus-visible,
 [data-platform="windows"] select:focus-visible,
-[data-platform="windows"] input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+[data-platform="windows"] input:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }
 [data-platform="windows"] .day-cell:focus-visible { outline: 2px solid var(--text); outline-offset: -4px; }
+[data-platform="windows"] .day-cell.today:focus-visible { outline: 2px solid var(--surface); outline-offset: -4px; }
 
 @media (max-width: 380px) {
-  [data-platform="windows"] .calendar-shell { padding: 10px; }
-  [data-platform="windows"] .calendar-header { gap: 3px; }
-  [data-platform="windows"] .calendar-select { padding-inline: 6px; font-size: 12px; }
-  [data-platform="windows"] .calendar-select-year { width: 74px; }
-  [data-platform="windows"] .month-control > button { width: 28px; }
+  [data-platform="windows"] .calendar-shell { padding: 12px 12px 10px; }
+  [data-platform="windows"] .current-datetime { flex-direction: row; align-items: center; gap: 6px; min-height: 66px; padding-bottom: 12px; }
+  [data-platform="windows"] .current-time { font-size: 28px; }
+  [data-platform="windows"] .current-time-seconds { font-size: 14px; }
+  [data-platform="windows"] .current-date strong { font-size: 13px; }
+  [data-platform="windows"] .calendar-header { gap: 4px; }
+  [data-platform="windows"] .calendar-select { padding-inline: 4px; font-size: 12px; }
+  [data-platform="windows"] .calendar-select-year { width: 70px; }
+  [data-platform="windows"] .month-control > button { width: 24px; }
   [data-platform="windows"] .toolbar-icon { width: 28px; }
-  [data-platform="windows"] .settings-panel { padding: 20px; }
+  [data-platform="windows"] .month-grid { gap: 3px; }
+  [data-platform="windows"] .rest-mark,
+  [data-platform="windows"] .work-mark { top: 1px; right: 1px; width: 10px; height: 10px; font-size: 8px; }
+  [data-platform="windows"] .settings-panel { padding: 18px; }
+}
+
+@media (max-height: 460px) {
+  [data-platform="windows"] .calendar-shell { padding-block: 10px; }
+  [data-platform="windows"] .current-datetime { min-height: 54px; margin-bottom: 4px; padding-bottom: 8px; }
+  [data-platform="windows"] .calendar-header { height: 40px; padding-bottom: 2px; }
+  [data-platform="windows"] .weekday-row { height: 24px; }
+  [data-platform="windows"] .month-grid { row-gap: 2px; }
+  [data-platform="windows"] .day-cell { padding-block: 1px; }
+  [data-platform="windows"] .calendar-countdown-summary { margin-top: 5px; padding-top: 6px; }
+}
+
+@media (forced-colors: active) {
+  [data-platform="windows"] .day-cell.today { border: 1px solid Highlight; }
+  [data-platform="windows"] .day-cell.selected,
+  [data-platform="windows"] .day-cell.today.selected { outline: 2px solid Highlight; outline-offset: -2px; }
+  [data-platform="windows"] .day-cell:focus-visible,
+  [data-platform="windows"] .day-cell.today:focus-visible { outline: 2px dashed Highlight; outline-offset: -4px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

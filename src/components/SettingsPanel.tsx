@@ -5,21 +5,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore, syncRuntimePreferences } from "../stores/settingsStore";
 import { useInfoStore } from "../stores/infoStore";
 import { translator, type Language } from "../data/i18n";
-import {
-  accentColors,
-  lightBackgroundColors,
-  darkBackgroundColors,
-  colorName,
-  type ColorInfo,
-} from "../data/colors";
 import { autostartApi, locationApi, type LocationCandidate, type UpdateStatus, type UpdateCheck } from "../services/ipc";
 import { StorageNotice } from "./StorageNotice";
 import { CountdownSettings } from "./CountdownSettings";
 
 type MenuBarStyle = "calendar" | "date" | "weekday_date";
-type View = "menu" | "appearance" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update" | "modules" | "countdown";
+type View = "menu" | "calendar" | "language" | "menubar" | "taskbarDate" | "location" | "update" | "modules" | "countdown";
 
-type SettingsIconName = Exclude<View, "menu"> | "settings" | "launch" | "back" | "light" | "dark" | "system";
+type SettingsIconName = Exclude<View, "menu"> | "appearance" | "settings" | "launch" | "back";
 
 function SettingsIcon({ name }: { name: SettingsIconName }) {
   const paths: Record<SettingsIconName, string> = {
@@ -35,9 +28,6 @@ function SettingsIcon({ name }: { name: SettingsIconName }) {
     update: "M20 8a8.5 8.5 0 0 0-14-3L3 8M3 3v5h5M4 16a8.5 8.5 0 0 0 14 3l3-3M16 16h5v5",
     launch: "M12 3v9M6 5a9 9 0 1 0 12 0",
     back: "M15 5l-7 7 7 7",
-    light: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5",
-    dark: "M20.5 13A9 9 0 0 1 11 3.5 9 9 0 1 0 20.5 13Z",
-    system: "M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM8 21h8M12 17v4",
   };
   return <svg className="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
@@ -100,42 +90,9 @@ function NavRow({
   );
 }
 
-function ColorSection({
-  title,
-  colors,
-  selected,
-  onSelect,
-  inChinese,
-}: {
-  title: string;
-  colors: ColorInfo[];
-  selected: string;
-  onSelect: (hex: string) => void;
-  inChinese: boolean;
-}) {
-  return (
-    <div className="settings-section">
-      <span className="section-label">{title}</span>
-      <div className="color-grid">
-        {colors.map((color) => (
-          <button
-            key={color.hex}
-            type="button"
-            className={`color-swatch ${selected.toUpperCase() === color.hex.toUpperCase() ? "active" : ""}`}
-            style={{ background: color.hex }}
-            title={inChinese ? color.name_zh : color.name_en}
-            onClick={() => onSelect(color.hex)}
-            aria-label={inChinese ? color.name_zh : color.name_en}
-          />
-        ))}
-      </div>
-      <p className="color-grid-name">{colorName(selected, colors, inChinese)}</p>
-    </div>
-  );
-}
-
 export function SettingsPanel({
   onClose,
+  onOpenAppearance,
   onCheckUpdates,
   onIgnoreVersion,
   onInstallUpdate,
@@ -146,6 +103,7 @@ export function SettingsPanel({
   initialView,
 }: {
   onClose: () => void;
+  onOpenAppearance: () => Promise<void>;
   onCheckUpdates: () => void;
   onIgnoreVersion: () => void;
   onInstallUpdate: () => void;
@@ -162,7 +120,7 @@ export function SettingsPanel({
   const [view, setView] = useState<View>(initialView ?? "menu");
   useEffect(() => { setView(initialView ?? "menu"); }, [initialView]);
   const [appVer, setAppVer] = useState(appVersion);
-  const [glassAvailable, setGlassAvailable] = useState(() => document.documentElement.dataset.nativeGlass === "true");
+  const [appearanceError, setAppearanceError] = useState(false);
   const [fallbackTray, setFallbackTray] = useState(true);
   const [clockTakeover, setClockTakeover] = useState(true);
   const [entryBusy, setEntryBusy] = useState(false);
@@ -179,20 +137,10 @@ export function SettingsPanel({
   }, [isWindows]);
 
   useEffect(() => {
-    if (isMac) void invoke<boolean>("macos_glass_enabled").then(setGlassAvailable).catch(console.error);
-  }, [isMac]);
-
-  useEffect(() => {
     if (!appVersion) void getVersion().then(setAppVer).catch(console.error);
   }, [appVersion]);
 
   const back = () => setView("menu");
-
-  const themeOptions: { value: "light" | "dark" | "system"; label: string; desc: string }[] = [
-    { value: "light", label: t("theme.light"), desc: t("theme.light.desc") },
-    { value: "dark", label: t("theme.dark"), desc: t("theme.dark.desc") },
-    { value: "system", label: t("theme.system"), desc: t("theme.system.desc") },
-  ];
 
   const languageOptions: { value: Language; label: string }[] = [
     { value: "system", label: t("language.system") },
@@ -231,8 +179,6 @@ export function SettingsPanel({
     : view === "location" ? "settings.locationWeather"
     : `settings.${view}`;
 
-  const effectiveDark = store.theme === "dark" || (store.theme === "system" && matchSystemDark());
-
   return (
     <section className="settings-panel" aria-label={t("settings.title")}>
       <div className="settings-header">
@@ -245,7 +191,11 @@ export function SettingsPanel({
       {view === "menu" ? (
         <nav className="settings-nav">
           <StorageNotice />
-          <NavRow icon="appearance" label={t("settings.appearance")} value={t(`theme.${store.theme === "system" ? "system" : store.theme}`)} onClick={() => setView("appearance")} />
+          <NavRow icon="appearance" label={t("settings.appearance")} value={t(`colorTheme.${store.appearance.colorTheme}`)} onClick={() => {
+            setAppearanceError(false);
+            void onOpenAppearance().catch((error) => { console.error(error); setAppearanceError(true); });
+          }} />
+          {appearanceError && <p className="date-format-error" role="alert">{t("appearance.openFailed")}</p>}
           <NavRow icon="calendar" label={t("settings.calendar")} onClick={() => setView("calendar")} />
           <NavRow icon="countdown" label={t("settings.countdown")} onClick={() => setView("countdown")} />
           <NavRow icon="modules" label={t("settings.modules")} onClick={() => setView("modules")} />
@@ -273,58 +223,6 @@ export function SettingsPanel({
           </div>
           {launchError && <p className="date-format-error" role="alert">{launchError}</p>}
         </nav>
-      ) : view === "appearance" ? (
-        <>
-          <BackRow onBack={back} />
-          <div className="settings-section">
-            <span className="section-label">{t("appearance.theme")}</span>
-            <div className="theme-options">
-              {themeOptions.map((option) => (
-                <button
-                  key={option.value}
-                  className={`theme-option ${store.theme === option.value ? "active" : ""}`}
-                  onClick={() => store.setTheme(option.value)}
-                >
-                  <SettingsIcon name={option.value} />
-                  <span className="theme-label">{option.label}</span>
-                  <span className="theme-desc">{option.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <ColorSection
-            title={t("appearance.accentColor")}
-            colors={accentColors}
-            selected={effectiveDark ? store.appearance.darkAccent : store.appearance.lightAccent}
-            onSelect={(hex) => store.setAccent(hex, effectiveDark)}
-            inChinese={inChinese}
-          />
-          <ColorSection
-            title={t("appearance.backgroundColor")}
-            colors={effectiveDark ? darkBackgroundColors : lightBackgroundColors}
-            selected={effectiveDark ? store.appearance.darkBackground : store.appearance.lightBackground}
-            onSelect={(hex) => store.setBackground(hex, effectiveDark)}
-            inChinese={inChinese}
-          />
-          {glassAvailable && (
-            <div className="settings-section glass-opacity-setting">
-              <label className="section-label" htmlFor="glass-opacity">{t("appearance.glassOpacity")}</label>
-              <div className="glass-opacity-control">
-                <input
-                  id="glass-opacity"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={store.appearance.glassOpacity}
-                  onChange={(event) => store.setGlassOpacity(Number(event.target.value))}
-                />
-                <output htmlFor="glass-opacity">{Math.round(store.appearance.glassOpacity)}%</output>
-              </div>
-              <p className="settings-description">{t("appearance.glassOpacity.desc")}</p>
-            </div>
-          )}
-        </>
       ) : view === "calendar" ? (
         <>
           <BackRow onBack={back} />
@@ -436,10 +334,6 @@ export function SettingsPanel({
 function BackRow({ onBack }: { onBack: () => void }) {
   const language = useSettingsStore((state) => state.language);
   return <button className="settings-back" onClick={onBack} style={{ marginBottom: 14 }}><SettingsIcon name="back" />{translator(language).t("settings.back")}</button>;
-}
-
-function matchSystemDark() {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function MenuBarSettings({ onBack, t }: { onBack: () => void; t: (key: string) => string }) {
