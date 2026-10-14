@@ -2,19 +2,16 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { App } from "./App";
-import { useSettingsStore, effectiveAppearance, syncRuntimePreferences } from "./stores/settingsStore";
+import { useSettingsStore, applyAppearance, syncRuntimePreferences } from "./stores/settingsStore";
 import "./styles/tokens.css";
+import "./styles/themes.css";
 
 const settings = useSettingsStore.getState();
-const { dark, accent, background } = effectiveAppearance(
+applyAppearance(
   settings.theme,
   window.matchMedia("(prefers-color-scheme: dark)").matches,
   settings.appearance,
 );
-document.documentElement.dataset.theme = dark ? "dark" : "light";
-document.documentElement.style.setProperty("--blue", accent);
-document.documentElement.style.setProperty("--shell-bg", background);
-document.documentElement.style.setProperty("--glass-opacity", `${settings.appearance.glassOpacity}%`);
 if ("__TAURI_INTERNALS__" in window) {
   void syncRuntimePreferences().catch(console.error);
   document.documentElement.dataset.platform = navigator.userAgent.includes("Macintosh") ? "macos" : "windows";

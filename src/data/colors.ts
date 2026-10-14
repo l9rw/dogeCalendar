@@ -77,6 +77,22 @@ export const DEFAULT_ACCENT = "#496cff";
 export const DEFAULT_LIGHT_BACKGROUND = "#FFFFFF";
 export const DEFAULT_DARK_BACKGROUND = "#1a1e25";
 
+export type ColorThemeId = "classic" | "indigo" | "emerald" | "coral" | "cobalt";
+
+export const colorThemes = [
+  { id: "classic", lightAccent: DEFAULT_ACCENT, lightBackground: DEFAULT_LIGHT_BACKGROUND, darkAccent: DEFAULT_ACCENT, darkBackground: DEFAULT_DARK_BACKGROUND },
+  { id: "indigo", lightAccent: "#5E6AD2", lightBackground: "#F8F9FC", darkAccent: "#8B95F6", darkBackground: "#11131A" },
+  { id: "emerald", lightAccent: "#0D9488", lightBackground: "#F7FBFA", darkAccent: "#2DD4BF", darkBackground: "#0E1716" },
+  { id: "coral", lightAccent: "#E14D2A", lightBackground: "#FAF8F6", darkAccent: "#FB7152", darkBackground: "#161312" },
+  { id: "cobalt", lightAccent: "#0284C7", lightBackground: "#F6FAFE", darkAccent: "#38BDF8", darkBackground: "#0E1621" },
+] as const satisfies readonly {
+  id: ColorThemeId;
+  lightAccent: string;
+  lightBackground: string;
+  darkAccent: string;
+  darkBackground: string;
+}[];
+
 export function colorName(hex: string, list: ColorInfo[], inChinese: boolean): string {
   const found = list.find((item) => item.hex.toUpperCase() === hex.toUpperCase());
   return found ? (inChinese ? found.name_zh : found.name_en) : hex;

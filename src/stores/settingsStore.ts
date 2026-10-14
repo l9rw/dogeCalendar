@@ -5,6 +5,8 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_DARK_BACKGROUND,
   DEFAULT_LIGHT_BACKGROUND,
+  colorThemes,
+  type ColorThemeId,
 } from "../data/colors";
 import type { Language } from "../data/i18n";
 import { resolveLanguage } from "../data/i18n";
@@ -15,6 +17,7 @@ export type Theme = "system" | "light" | "dark";
 export type WeekStart = 0 | 1 | 6; // Sunday | Monday | Saturday (JS getDay)
 
 export type Appearance = {
+  colorTheme: ColorThemeId;
   lightAccent: string;
   lightBackground: string;
   darkAccent: string;
@@ -46,6 +49,7 @@ export type SettingsState = {
   ready: boolean;
 
   setTheme: (theme: Theme) => void;
+  setColorTheme: (theme: ColorThemeId) => void;
   setAccent: (hex: string, dark: boolean) => void;
   setBackground: (hex: string, dark: boolean) => void;
   setGlassOpacity: (opacity: number) => void;
@@ -71,6 +75,7 @@ type Persisted = {
 const defaults: Persisted = {
   theme: "system",
   appearance: {
+    colorTheme: "classic",
     lightAccent: DEFAULT_ACCENT,
     lightBackground: DEFAULT_LIGHT_BACKGROUND,
     darkAccent: DEFAULT_ACCENT,
@@ -99,11 +104,14 @@ function load(): Persisted {
     }
     const parsed = JSON.parse(raw) as Partial<Persisted>;
     const savedOpacity = parsed.appearance?.glassOpacity;
+    const { id: colorTheme, ...palette } = colorThemes.find((theme) => theme.id === parsed.appearance?.colorTheme) ?? colorThemes[0];
     return {
       theme: parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system" ? parsed.theme : defaults.theme,
       appearance: {
         ...defaults.appearance,
+        ...palette,
         ...Object.fromEntries(Object.entries(parsed.appearance ?? {}).filter(([key, value]) => key in defaults.appearance && typeof value === "string" && /^#[\da-f]{6}$/i.test(value))),
+        colorTheme,
         glassOpacity: typeof savedOpacity === "number" && Number.isFinite(savedOpacity)
           ? Math.max(0, Math.min(100, savedOpacity))
           : defaults.appearance.glassOpacity,
@@ -152,6 +160,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setTheme: (theme) => {
       set({ theme });
+      persist(get());
+    },
+    setColorTheme: (theme) => {
+      const palette = colorThemes.find((candidate) => candidate.id === theme);
+      if (!palette) return;
+      const { id, ...colors } = palette;
+      set({ appearance: { ...get().appearance, ...colors, colorTheme: id } });
       persist(get());
     },
     setAccent: (hex, dark) => {
@@ -244,6 +259,20 @@ export function effectiveAppearance(theme: Theme, systemDark: boolean, appearanc
     accent: dark ? appearance.darkAccent : appearance.lightAccent,
     background: dark ? appearance.darkBackground : appearance.lightBackground,
   };
+}
+
+// Seed and update every WebView with the same palette before its next paint.
+export function applyAppearance(theme: Theme, systemDark: boolean, appearance: Appearance) {
+  const { dark, accent, background } = effectiveAppearance(theme, systemDark, appearance);
+  const root = document.documentElement;
+  root.dataset.theme = dark ? "dark" : "light";
+  root.dataset.colorTheme = appearance.colorTheme;
+  root.style.setProperty("--blue", accent);
+  root.style.setProperty("--chip-soft", `color-mix(in srgb, ${accent} 14%, transparent)`);
+  root.style.setProperty("--shell-border", `color-mix(in srgb, ${accent} 32%, var(--line))`);
+  root.style.setProperty("--surface-3", `color-mix(in srgb, ${accent} 9%, var(--surface-2))`);
+  root.style.setProperty("--shell-bg", background);
+  root.style.setProperty("--glass-opacity", `${appearance.glassOpacity}%`);
 }
 
 export { resolveLanguage };

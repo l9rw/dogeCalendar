@@ -35,7 +35,8 @@ test("settings synchronize across windows without redundant notifications", asyn
       : import.meta.resolve(specifier);
     compiled = compiled.replaceAll(`"${specifier}"`, JSON.stringify(resolved));
   }
-  const { useSettingsStore } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+  const { useSettingsStore, effectiveAppearance, applyAppearance } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+  assert.equal(useSettingsStore.getState().appearance.colorTheme, "classic");
   useSettingsStore.getState().setTheme("dark");
   let notifications = 0;
   const unsubscribe = useSettingsStore.subscribe(() => notifications++);
@@ -136,5 +137,129 @@ test("settings synchronize across windows without redundant notifications", asyn
     for (const key of ["appearance", "calendar", "update"]) assert.equal(after[key], before[key]);
     window.dispatchEvent(new Event("focus"));
     assert.equal(notifications, count + 1);
+  });
+
+  await t.test("old and invalid palette settings keep classic and existing custom colors", () => {
+    const before = useSettingsStore.getState();
+    const { colorTheme, ...appearance } = before.appearance;
+    save({ ...saved(), appearance: { ...appearance, lightAccent: "#123456", darkBackground: "#121212" } });
+    storageEvent("calendar-settings");
+    const after = useSettingsStore.getState();
+    assert.equal(after.appearance.colorTheme, "classic");
+    assert.equal(after.appearance.lightAccent, "#123456");
+    assert.equal(after.appearance.darkBackground, "#121212");
+    const count = notifications;
+    for (const invalid of ["unknown", "#123456", null, 42]) {
+      save({ ...saved(), appearance: { ...after.appearance, colorTheme: invalid } });
+      storageEvent("calendar-settings");
+      assert.equal(useSettingsStore.getState().appearance, after.appearance);
+      assert.equal(notifications, count);
+    }
+  });
+
+  await t.test("presets apply both color modes without changing unrelated preferences", async () => {
+    const { colorThemes } = await import("../data/colors.ts");
+    assert.equal(colorThemes.length, 5);
+    assert.equal(new Set(colorThemes.map((palette) => palette.id)).size, 5);
+    useSettingsStore.getState().setGlassOpacity(43);
+    for (const palette of colorThemes) {
+      const before = useSettingsStore.getState();
+      before.setColorTheme(palette.id);
+      const after = useSettingsStore.getState();
+      assert.equal(after.appearance.colorTheme, palette.id);
+      for (const key of ["lightAccent", "lightBackground", "darkAccent", "darkBackground"]) {
+        assert.equal(after.appearance[key], palette[key]);
+      }
+      assert.equal(after.appearance.glassOpacity, 43);
+      for (const key of ["theme", "language", "calendar", "update", "modules", "ready", "launchAtLogin"]) {
+        assert.equal(after[key], before[key]);
+      }
+      assert.deepEqual(saved().appearance, after.appearance);
+    }
+    const before = useSettingsStore.getState();
+    before.setColorTheme("unknown");
+    assert.equal(useSettingsStore.getState(), before);
+  });
+
+  await t.test("palette-only storage changes synchronize and hydrate preset defaults", () => {
+    const before = useSettingsStore.getState();
+    const count = notifications;
+    save({ ...saved(), appearance: { ...before.appearance, colorTheme: "coral" } });
+    storageEvent("calendar-settings");
+    const after = useSettingsStore.getState();
+    assert.equal(after.appearance.colorTheme, "coral");
+    assert.equal(after.appearance.lightAccent, before.appearance.lightAccent);
+    assert.equal(after.appearance.glassOpacity, before.appearance.glassOpacity);
+    for (const key of ["theme", "calendar", "modules", "setColorTheme"]) assert.equal(after[key], before[key]);
+    assert.equal(notifications, count + 1);
+    window.dispatchEvent(new Event("focus"));
+    assert.equal(notifications, count + 1);
+
+    save({ ...saved(), appearance: { colorTheme: "emerald" } });
+    storageEvent("calendar-settings");
+    assert.equal(useSettingsStore.getState().appearance.lightBackground, "#F7FBFA");
+    assert.equal(useSettingsStore.getState().appearance.darkAccent, "#2DD4BF");
+  });
+
+  await t.test("hidden auxiliary windows refresh a changed palette when shown or focused", () => {
+    const before = useSettingsStore.getState();
+    save({ ...saved(), appearance: { colorTheme: "indigo" } });
+    document.hidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(useSettingsStore.getState(), before);
+    document.hidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(useSettingsStore.getState().appearance.colorTheme, "indigo");
+    save({ ...saved(), appearance: { colorTheme: "cobalt" } });
+    window.dispatchEvent(new Event("focus"));
+    assert.equal(useSettingsStore.getState().appearance.colorTheme, "cobalt");
+  });
+
+  await t.test("custom colors survive color-mode changes and can restore their palette", () => {
+    const store = useSettingsStore.getState();
+    store.setGlassOpacity(43);
+    store.setColorTheme("coral");
+    store.setAccent("#ABCDEF", false);
+    store.setBackground("#101010", true);
+    const appearance = useSettingsStore.getState().appearance;
+    assert.equal(appearance.colorTheme, "coral");
+    assert.equal(saved().appearance.lightAccent, "#ABCDEF");
+    for (const mode of ["light", "dark", "system"]) {
+      useSettingsStore.getState().setTheme(mode);
+      assert.equal(useSettingsStore.getState().appearance, appearance);
+    }
+    assert.deepEqual(effectiveAppearance("system", false, appearance), { dark: false, accent: "#ABCDEF", background: "#FAF8F6" });
+    assert.deepEqual(effectiveAppearance("system", true, appearance), { dark: true, accent: "#FB7152", background: "#101010" });
+    useSettingsStore.getState().setColorTheme(appearance.colorTheme);
+    assert.equal(useSettingsStore.getState().appearance.lightAccent, "#E14D2A");
+    assert.equal(useSettingsStore.getState().appearance.darkBackground, "#161312");
+  });
+
+  await t.test("initial and runtime appearance share the same root palette variables", () => {
+    const properties = new Map();
+    document.documentElement = { dataset: {}, style: { setProperty: (key, value) => properties.set(key, value) } };
+    const appearance = useSettingsStore.getState().appearance;
+    applyAppearance("system", false, appearance);
+    assert.equal(document.documentElement.dataset.theme, "light");
+    assert.equal(document.documentElement.dataset.colorTheme, "coral");
+    assert.equal(properties.get("--blue"), "#E14D2A");
+    assert.equal(properties.get("--shell-bg"), "#FAF8F6");
+    assert.equal(properties.get("--glass-opacity"), "43%");
+    applyAppearance("system", true, appearance);
+    assert.equal(document.documentElement.dataset.theme, "dark");
+    assert.equal(properties.get("--blue"), "#FB7152");
+    assert.equal(properties.get("--shell-bg"), "#161312");
+  });
+
+  await t.test("every color theme and appearance control has bilingual labels", async () => {
+    const { colorThemes } = await import("../data/colors.ts");
+    const { translator } = await import("../data/i18n.ts");
+    for (const language of ["zh_CN", "en_US"]) {
+      const { t } = translator(language);
+      for (const palette of colorThemes) {
+        for (const key of [`colorTheme.${palette.id}`, `colorTheme.${palette.id}.desc`]) assert.notEqual(t(key), key);
+      }
+      for (const key of ["appearance.colorTheme", "appearance.colorTheme.desc", "appearance.default", "appearance.resetPalette", "appearance.livePreview", "appearance.openFailed"]) assert.notEqual(t(key), key);
+    }
   });
 });

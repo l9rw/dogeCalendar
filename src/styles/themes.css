@@ -1,0 +1,120 @@
+/* Palettes only. Layout, sizing and interaction states live in tokens.css. */
+:root {
+  --theme-accent: var(--blue);
+  --theme-tint: var(--chip-soft);
+  --on-accent: #ffffff;
+  --time-ink: var(--blue);
+}
+
+/* Classic inherits the original light/dark tokens without replacing user colors. */
+:root[data-color-theme]:where(:not([data-color-theme="classic"])) {
+  --surface: var(--shell-bg, #ffffff);
+  --surface-2: color-mix(in srgb, var(--blue) 4%, color-mix(in srgb, var(--text) 2.5%, var(--surface)));
+  --surface-3: color-mix(in srgb, var(--blue) 9%, var(--surface-2));
+  --text: #0F172A;
+  --text-soft: #334155;
+  --text-dim: #64748B;
+  --text-faint: #94A3B8;
+  --muted: var(--text-dim);
+  --red: #E11D48;
+  --line: color-mix(in srgb, var(--text) 8%, var(--surface));
+  --border-strong: color-mix(in srgb, var(--text) 15%, var(--surface));
+  --holiday-bg: color-mix(in srgb, var(--red) 7%, var(--surface));
+  --workday-bg: var(--surface-2);
+  --work-mark-bg: var(--text-soft);
+  --scrollbar: color-mix(in srgb, var(--text) 18%, var(--surface));
+  --shadow-panel: 0 12px 32px color-mix(in srgb, var(--text) 8%, transparent);
+  --theme-accent: var(--blue);
+  --theme-tint: color-mix(in srgb, var(--blue) 12%, var(--surface));
+  --on-accent: #ffffff;
+  --time-ink: var(--blue);
+}
+:root[data-color-theme][data-theme="dark"]:where(:not([data-color-theme="classic"])) {
+  --surface-2: color-mix(in srgb, var(--blue) 6%, color-mix(in srgb, var(--text) 4.5%, var(--surface)));
+  --surface-3: color-mix(in srgb, var(--blue) 13%, var(--surface-2));
+  --text: #F1F5F9;
+  --text-soft: #CBD5E1;
+  --text-dim: #94A3B8;
+  --text-faint: #475569;
+  --red: #FB7185;
+  --line: color-mix(in srgb, var(--text) 10%, var(--surface));
+  --border-strong: color-mix(in srgb, var(--text) 17%, var(--surface));
+  --holiday-bg: color-mix(in srgb, var(--red) 11%, var(--surface));
+  --shadow-panel: 0 12px 32px rgba(0, 0, 0, .42);
+  --theme-tint: color-mix(in srgb, var(--blue) 16%, var(--surface));
+  --on-accent: var(--surface);
+  --time-ink: var(--blue);
+}
+
+:root[data-color-theme="indigo"] {
+  --text: #111827;
+  --text-soft: #374151;
+  --text-dim: #6B7280;
+  --text-faint: #9CA3AF;
+  --red: #E11D48;
+}
+:root[data-color-theme="indigo"][data-theme="dark"] {
+  --text: #F3F4F6;
+  --text-soft: #D1D5DB;
+  --text-dim: #9CA3AF;
+  --text-faint: #4B5563;
+  --red: #FB7185;
+}
+
+:root[data-color-theme="emerald"] {
+  --text: #0F221F;
+  --text-soft: #314C47;
+  --text-dim: #5B7A74;
+  --text-faint: #92ADA7;
+  --red: #E11D48;
+}
+:root[data-color-theme="emerald"][data-theme="dark"] {
+  --text: #ECFDF5;
+  --text-soft: #B5D6CE;
+  --text-dim: #7DA39A;
+  --text-faint: #3F5E57;
+  --red: #FB7185;
+}
+
+:root[data-color-theme="coral"] {
+  --text: #1C1917;
+  --text-soft: #44403C;
+  --text-dim: #78716C;
+  --text-faint: #A8A29E;
+  --red: #DC2626;
+}
+:root[data-color-theme="coral"][data-theme="dark"] {
+  --text: #F5F5F4;
+  --text-soft: #D6D3D1;
+  --text-dim: #A8A29E;
+  --text-faint: #57534E;
+  --red: #F87171;
+}
+
+:root[data-color-theme="cobalt"] {
+  --text: #0C1A2A;
+  --text-soft: #2E445C;
+  --text-dim: #5D758F;
+  --text-faint: #93A8BF;
+  --red: #E11D48;
+}
+:root[data-color-theme="cobalt"][data-theme="dark"] {
+  --text: #F0F9FF;
+  --text-soft: #BDCEE0;
+  --text-dim: #839AB2;
+  --text-faint: #465B73;
+  --red: #FB7185;
+}
+
+/* Resolve the saved accent on the root before shared controls inherit its ink. */
+[data-platform="windows"] body,
+:root[data-color-theme]:where(:not([data-color-theme="classic"])) body { --blue: var(--theme-accent); }
+:root[data-platform="macos"][data-color-theme]:where(:not([data-color-theme="classic"])) { --mac-panel: color-mix(in srgb, var(--surface) 78%, transparent); }
+:root[data-native-glass="true"][data-color-theme]:where(:not([data-color-theme="classic"])) {
+  --glass-surface: color-mix(in srgb, var(--surface) 34%, transparent);
+  --glass-raised: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+:root[data-native-glass="true"][data-theme="dark"][data-color-theme]:where(:not([data-color-theme="classic"])) {
+  --glass-surface: color-mix(in srgb, var(--surface) 28%, transparent);
+  --glass-raised: color-mix(in srgb, var(--surface) 48%, transparent);
+}
