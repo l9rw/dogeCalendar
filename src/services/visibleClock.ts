@@ -3,6 +3,7 @@ export function startVisibleClock(options: {
   update: (date: Date) => void;
   schedule: (callback: () => void, delay: number) => number;
   cancel: (timer: number) => void;
+  interval?: "second" | "day";
   now?: () => Date;
   onError: (error: unknown) => void;
 }) {
@@ -20,7 +21,11 @@ export function startVisibleClock(options: {
       // Focus and visibility events can overlap asynchronous native queries.
       if (disposed || started !== revision || !visible) return;
       options.update(now());
-      timer = options.schedule(() => { void refresh(); }, 1000 - now().getTime() % 1000);
+      const current = now();
+      const delay = options.interval === "day"
+        ? new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1).getTime() - current.getTime() + 50
+        : 1000 - current.getTime() % 1000;
+      timer = options.schedule(() => { void refresh(); }, delay);
     } catch (error) {
       if (!disposed && started === revision) options.onError(error);
     }

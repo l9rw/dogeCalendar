@@ -48,20 +48,30 @@ const FEEDBACK_URL = `mailto:i@l9rw.cn?subject=${encodeURIComponent("dogeCalenda
 function useVisibleToday() {
   const [today, setToday] = useState(() => dateKey(new Date()));
   useEffect(() => {
-    let timer: number | undefined;
-    const refresh = () => {
-      window.clearTimeout(timer);
-      if (document.hidden) return;
-      const now = new Date();
-      setToday(dateKey(now));
-      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      timer = window.setTimeout(refresh, midnight.getTime() - now.getTime() + 50);
-    };
-    refresh();
+    const nativeWindow = "__TAURI_INTERNALS__" in window ? getCurrentWindow() : null;
+    const clock = startVisibleClock({
+      isVisible: () => nativeWindow ? nativeWindow.isVisible() : !document.hidden,
+      update: (date) => setToday(dateKey(date)),
+      schedule: (callback, delay) => window.setTimeout(callback, delay),
+      cancel: (timer) => window.clearTimeout(timer),
+      interval: "day",
+      onError: console.error,
+    });
+    const refresh = () => { void clock.refresh(); };
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    if (nativeWindow) {
+      void nativeWindow.onFocusChanged(refresh).then((dispose) => {
+        if (disposed) dispose();
+        else { unlisten = dispose; refresh(); }
+      }).catch(console.error);
+    }
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
     return () => {
-      window.clearTimeout(timer);
+      disposed = true;
+      clock.dispose();
+      unlisten?.();
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
     };
@@ -393,17 +403,37 @@ function CalendarApp() {
   useEffect(() => {
     if (!calendar.showHolidays) return;
     let active = true;
-    const refresh = () => {
-      if (document.hidden) return;
-      const visibleYears = Array.from(new Set([Number(today.slice(0, 4)), Number(today.slice(0, 4)) + 1, ...(view === "year" ? [cursorYear] : days.map((day) => day.date.getFullYear()))]));
-      void Promise.all(visibleYears.map(async (year) => {
+    let revision = 0;
+    const nativeWindow = "__TAURI_INTERNALS__" in window ? getCurrentWindow() : null;
+    const load = async () => {
+      const started = ++revision;
+      const visible = nativeWindow ? await nativeWindow.isVisible() : !document.hidden;
+      if (!active || started !== revision || !visible) return;
+      const currentYear = new Date().getFullYear();
+      const visibleYears = Array.from(new Set([currentYear, currentYear + 1, ...(view === "year" ? [cursorYear] : days.map((day) => day.date.getFullYear()))]));
+      await Promise.all(visibleYears.map(async (year) => {
         const data = await fetchHolidayYear(year, modules.network);
-        if (active) setHolidayYears((current) => data ? { ...current, [year]: data } : { ...current });
+        if (active && data) setHolidayYears((current) => current[year] === data ? current : { ...current, [year]: data });
       }));
     };
+    const refresh = () => { void load().catch(console.error); };
+    let unlisten: (() => void) | undefined;
+    if (nativeWindow) {
+      void nativeWindow.onFocusChanged(refresh).then((dispose) => {
+        if (!active) dispose();
+        else { unlisten = dispose; refresh(); }
+      }).catch(console.error);
+    }
     refresh();
     document.addEventListener("visibilitychange", refresh);
-    return () => { active = false; document.removeEventListener("visibilitychange", refresh); };
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      ++revision;
+      unlisten?.();
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
    }, [cursorYear, cursor.getMonth(), view, calendar.showHolidays, modules.network, today]);
 
   useEffect(() => {
@@ -674,7 +704,11 @@ function CalendarApp() {
         <section className="calendar-area" aria-label={t("settings.calendar")}>
         <header className="calendar-header">
           <div className="month-control">
-            <button aria-label={t("calendar.previousMonth")} title={t("calendar.previousMonth")} onClick={() => moveMonth(-1)}>‹</button>
+            <button aria-label={t("calendar.previousMonth")} title={t("calendar.previousMonth")} onClick={() => moveMonth(-1)}>
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                <path d="m10 4-4 4 4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
             <select
               className="calendar-select"
               aria-label={t("settings.calendar")}
@@ -683,7 +717,11 @@ function CalendarApp() {
             >
                {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2026, month, 1).toLocaleDateString(inChinese ? "zh-CN" : "en-US", { month: "short" })}</option>)}
             </select>
-            <button aria-label={t("calendar.nextMonth")} title={t("calendar.nextMonth")} onClick={() => moveMonth(1)}>›</button>
+            <button aria-label={t("calendar.nextMonth")} title={t("calendar.nextMonth")} onClick={() => moveMonth(1)}>
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                <path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
           <select
             className="calendar-select calendar-select-year"

@@ -41,9 +41,8 @@ export interface HolidayYearInfo {
   source: string;
   version: string;
   fetchedAt?: number;
-  // True when cached remote data is past cacheTtl; false for built-in (never
-  // expires); undefined when no data exists. Lets the UI show a stale badge
-  // and trigger a refresh without implying the data is missing.
+  // Cache age for display only; online polling follows the November daily
+  // schedule. Built-in data never expires; missing data has no expiry flag.
   expired?: boolean;
   // True for built-in curated data. Built-in takes priority over remote cache
   // and is always treated as fresh. The label is non-official curated data,
@@ -68,29 +67,35 @@ interface CachedHolidayYear {
 interface HolidayCachePayload {
   schema: number;
   years: Record<number, CachedHolidayYear>;
+  requests?: Record<number, HolidayRequestState>;
+}
+
+interface HolidayRequestState {
+  day: string;
+  attempts: number;
+  done: boolean;
 }
 
 const BUILT_IN_SOURCE = "内置整理数据";
-const BUILT_IN_VERSION = "built-in-2007-2026";
+const BUILT_IN_VERSION = "built-in-2007-2027";
 const REMOTE_SOURCE = "timor.tech（非官方源）";
 const REMOTE_VERSION = "timor";
+const FALLBACK_SOURCE = "holiday-cn（非官方源，经 jsDelivr）";
+const FALLBACK_VERSION = "holiday-cn";
 
 const CACHE_KEY = "dogecalendar.holidays.v1";
 const CACHE_SCHEMA = 1;
 
 export const fetchConfig = {
   timeout: 8000,
-  retries: 2,
+  retries: 3,
   backoff: [500, 1500],
   cacheTtl: 30 * 24 * 60 * 60 * 1000,
 };
 
 const remoteHolidayRequests = new Map<number, Promise<HolidayYear | null>>();
 const remoteControllers = new Map<number, AbortController>();
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
+const remoteRequestStates = new Map<number, HolidayRequestState>();
 
 function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -173,8 +178,34 @@ function writeCachedHolidayYear(entry: CachedHolidayYear) {
   writeCache(cache);
 }
 
+function readRequestState(year: number): HolidayRequestState | undefined {
+  const stored = readCache()?.requests?.[year];
+  const valid = stored && typeof stored === "object" && typeof stored.day === "string" &&
+    isValidDateKey(stored.day, year - 1) && Number.isInteger(stored.attempts) && stored.attempts >= 0 &&
+    typeof stored.done === "boolean" ? stored : undefined;
+  const memory = remoteRequestStates.get(year);
+  if (!memory) return valid;
+  if (!valid) return memory;
+  if (memory.day !== valid.day) return memory.day > valid.day ? memory : valid;
+  return { day: memory.day, attempts: Math.max(memory.attempts, valid.attempts), done: memory.done || valid.done };
+}
+
+function writeRequestState(year: number, state: HolidayRequestState) {
+  const current = readRequestState(year);
+  if (current && current.day > state.day) return;
+  const merged = current?.day === state.day
+    ? { ...state, attempts: Math.max(current.attempts, state.attempts), done: current.done || state.done }
+    : state;
+  remoteRequestStates.set(year, merged);
+  const cache = readCache() ?? { schema: CACHE_SCHEMA, years: {} };
+  cache.requests = { ...cache.requests, [year]: merged };
+  writeCache(cache);
+}
+
 function parseTimorPayload(year: number, payload: unknown): HolidayYear | null {
   if (!payload || typeof payload !== "object") return null;
+  const code = (payload as { code?: unknown }).code;
+  if (code !== undefined && code !== 0) return null;
   const holiday = (payload as { holiday?: unknown }).holiday;
   if (!holiday || typeof holiday !== "object" || Array.isArray(holiday)) return null;
   const entries = Object.values(holiday as Record<string, unknown>);
@@ -199,51 +230,88 @@ function parseTimorPayload(year: number, payload: unknown): HolidayYear | null {
   return Object.keys(result).length > 0 ? result : null;
 }
 
-async function fetchRemoteHolidayYear(year: number, cancellation: AbortSignal): Promise<HolidayYear | null> {
-  const url = `https://timor.tech/api/holiday/year/${year}`;
-  for (let attempt = 0; attempt <= fetchConfig.retries; attempt++) {
-    if (cancellation.aborted) return null;
-    if (attempt > 0) {
-      const index = Math.min(attempt - 1, fetchConfig.backoff.length - 1);
-      await delay(fetchConfig.backoff[index] ?? 1000);
-    }
-    if (cancellation.aborted) return null;
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    cancellation.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => controller.abort(), fetchConfig.timeout);
-    try {
-      let response: Response;
-      try {
-        // The abort signal stays active through response.json() so a slow body
-        // read is also bounded by the timeout, not just the response headers.
-        response = await fetch(url, { signal: controller.signal });
-      } catch (error) {
-        if (cancellation.aborted) return null;
-        if (isAbortError(error)) continue; // timeout on headers -> retry
-        continue; // transient network error -> retry with backoff
-      }
-      if (response.status >= 500) continue; // transient server error -> retry
-      if (!response.ok) return null; // 4xx -> hard fail, no cache
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        if (cancellation.aborted) return null;
-        if (isAbortError(error)) continue; // timeout while reading body -> retry
-        return null; // malformed JSON -> hard fail, no cache
-      }
-      const parsed = parseTimorPayload(year, payload);
-      if (!parsed) return null; // invalid payload -> hard fail, no cache
-      if (cancellation.aborted) return null;
-      writeCachedHolidayYear({ year, data: parsed, source: REMOTE_SOURCE, version: REMOTE_VERSION, fetchedAt: Date.now() });
-      return parsed;
-    } finally {
-      clearTimeout(timer);
-      cancellation.removeEventListener("abort", abort);
-    }
+function parseHolidayCnPayload(year: number, payload: unknown): HolidayYear | null {
+  if (!payload || typeof payload !== "object") return null;
+  const { year: payloadYear, papers, days } = payload as Record<string, unknown>;
+  if (payloadYear !== year || !Array.isArray(days) || days.length === 0) return null;
+  if (!Array.isArray(papers) || papers.length === 0 || papers.some((paper) => typeof paper !== "string" || !paper.trim())) return null;
+  const result: HolidayYear = {};
+  for (const entry of days) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const { date, name, isOffDay } = entry as Record<string, unknown>;
+    if (typeof date !== "string" || typeof name !== "string" || !name.trim() || typeof isOffDay !== "boolean") return null;
+    // Files follow the announcement year, so New Year arrangements may also
+    // include the previous December rather than only dates in the title year.
+    if (!isValidDateKey(date, year) && !(isValidDateKey(date, year - 1) && date.slice(5, 7) === "12")) return null;
+    if (result[date]) return null;
+    result[date] = { name: name.trim(), status: isOffDay ? "rest" : "workday" };
   }
-  return null;
+  return result;
+}
+
+async function fetchHolidaySource(
+  year: number,
+  url: string,
+  parse: (year: number, payload: unknown) => HolidayYear | null,
+  cancellation: AbortSignal,
+): Promise<{ data: HolidayYear | null; retryable: boolean }> {
+  if (cancellation.aborted) return { data: null, retryable: false };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  cancellation.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => controller.abort(), fetchConfig.timeout);
+  try {
+    let response: Response;
+    try {
+      // Bound both response headers and body reads by the same timeout.
+      response = await fetch(url, { signal: controller.signal });
+    } catch {
+      return { data: null, retryable: !cancellation.aborted };
+    }
+    if (response.status >= 500) return { data: null, retryable: true };
+    if (!response.ok) return { data: null, retryable: false };
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      return { data: null, retryable: !cancellation.aborted && !(error instanceof SyntaxError) };
+    }
+    const parsed = parse(year, payload);
+    return { data: cancellation.aborted ? null : parsed, retryable: false };
+  } finally {
+    clearTimeout(timer);
+    cancellation.removeEventListener("abort", abort);
+  }
+}
+
+async function fetchRemoteHolidayYear(year: number, cancellation: AbortSignal): Promise<{ data: HolidayYear | null; retryable: boolean }> {
+  const primary = await fetchHolidaySource(year, `https://timor.tech/api/holiday/year/${year}`, parseTimorPayload, cancellation);
+  let data = primary.data;
+  let retryable = primary.retryable;
+  let source = REMOTE_SOURCE;
+  let version = REMOTE_VERSION;
+  if (!data && !cancellation.aborted) {
+    const url = `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`;
+    const fallback = await fetchHolidaySource(year, url, parseHolidayCnPayload, cancellation);
+    retryable ||= fallback.retryable;
+    if (!fallback.data || cancellation.aborted) return { data: null, retryable };
+    data = Object.fromEntries(Object.entries(fallback.data).filter(([date]) => isValidDateKey(date, year)));
+    if (Object.keys(data).length === 0) return { data: null, retryable };
+    // Never probe the third year. Preserve any December adjustments cached by
+    // older versions that read the following year's announcement.
+    const cached = readCachedHolidayYear(year);
+    if (cached) {
+      for (const [date, entry] of Object.entries(cached.data)) {
+        if (date.slice(5, 7) !== "12") continue;
+        data[date] = entry;
+      }
+    }
+    source = FALLBACK_SOURCE;
+    version = FALLBACK_VERSION;
+  }
+  if (!data || cancellation.aborted) return { data: null, retryable };
+  writeCachedHolidayYear({ year, data, source, version, fetchedAt: Date.now() });
+  return { data, retryable: false };
 }
 
 export function cancelHolidayRequests(): void {
@@ -258,23 +326,47 @@ export async function fetchHolidayYear(year: number, allowNetwork = true): Promi
   if (!Number.isInteger(year) || year < 1900 || year > 2100) return null;
   if (holidayOverrides[year]) return holidayOverrides[year];
   const cached = readCachedHolidayYear(year);
-  if (cached) {
-    const fresh = Date.now() - cached.fetchedAt <= fetchConfig.cacheTtl;
-    if (fresh || !allowNetwork) return cached.data;
-  }
-  // Network disabled takes precedence over joining an in-flight request so a
-  // caller that just turned networking off never waits on a failing fetch.
-  if (!allowNetwork) return null;
+  const now = new Date();
+  // Only poll next year's arrangements from November 1 through December 31.
+  // Browsing other years, including missing historical years, stays offline.
+  if (!allowNetwork || now.getMonth() < 10 || year !== now.getFullYear() + 1) return cached?.data ?? null;
   const existing = remoteHolidayRequests.get(year);
   if (existing) return existing;
+  const today = dateKey(now);
+  const previous = readRequestState(year);
+  const maxAttempts = 1 + fetchConfig.retries;
+  if (previous && (previous.day > today || (previous.day === today && (previous.done || previous.attempts >= maxAttempts)))) return cached?.data ?? null;
+  if (!previous && cached && dateKey(new Date(cached.fetchedAt)) >= today) return cached.data;
   const controller = new AbortController();
   remoteControllers.set(year, controller);
-  const request = fetchRemoteHolidayYear(year, controller.signal)
-    .then((data) => data ?? cached?.data ?? null)
-    .finally(() => {
-      if (remoteHolidayRequests.get(year) === request) remoteHolidayRequests.delete(year);
-      if (remoteControllers.get(year) === controller) remoteControllers.delete(year);
-    });
+  const request = (async () => {
+    while (!controller.signal.aborted) {
+      const current = new Date();
+      // Retries cannot cross a local day or the annual request window.
+      if (dateKey(current) !== today || current.getMonth() < 10 || year !== current.getFullYear() + 1) break;
+      const state = readRequestState(year);
+      const attempts = state?.day === today ? state.attempts : 0;
+      if (state && (state.day > today || (state.day === today && (state.done || attempts >= maxAttempts)))) break;
+      if (attempts > 0) {
+        const index = Math.min(attempts - 1, fetchConfig.backoff.length - 1);
+        await delay(fetchConfig.backoff[index] ?? 1000);
+        if (controller.signal.aborted || dateKey(new Date()) !== today) break;
+      }
+      // Reserve each round before fetching; restarts and cancellation must not
+      // reset the daily retry budget. Only valid new data marks success.
+      writeRequestState(year, { day: today, attempts: attempts + 1, done: false });
+      const result = await fetchRemoteHolidayYear(year, controller.signal);
+      if (controller.signal.aborted) break;
+      if (result.data || !result.retryable) {
+        writeRequestState(year, { day: today, attempts: attempts + 1, done: true });
+        return result.data ?? cached?.data ?? null;
+      }
+    }
+    return cached?.data ?? null;
+  })().finally(() => {
+    if (remoteHolidayRequests.get(year) === request) remoteHolidayRequests.delete(year);
+    if (remoteControllers.get(year) === controller) remoteControllers.delete(year);
+  });
   remoteHolidayRequests.set(year, request);
   return request;
 }

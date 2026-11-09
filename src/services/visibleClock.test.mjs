@@ -4,7 +4,7 @@ import { startVisibleClock } from "./visibleClock.ts";
 
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
 
-function fixture(isVisible = () => true) {
+function fixture(isVisible = () => true, interval = "second") {
   const timers = new Map();
   const dates = [];
   const errors = [];
@@ -12,6 +12,7 @@ function fixture(isVisible = () => true) {
   let id = 0;
   const clock = startVisibleClock({
     isVisible,
+    interval,
     update: (date) => dates.push(date),
     now: () => new Date(time),
     schedule: (callback, delay) => { timers.set(++id, { callback, delay }); return id; },
@@ -97,4 +98,45 @@ test("visibility query errors are handled without unhandled rejection", async ()
   assert.equal(f.errors.length, 1);
   assert.equal(f.timers.size, 0);
   f.clock.dispose();
+});
+
+test("daily clock schedules local midnight and catches up when a native panel reopens", async () => {
+  let visible = true;
+  const f = fixture(async () => visible, "day");
+  const before = new Date(2027, 9, 31, 23, 59, 59, 500);
+  f.setTime(before.getTime());
+  await f.clock.refresh();
+  assert.equal([...f.timers.values()][0].delay, 550);
+  const [id, timer] = [...f.timers][0];
+  f.setTime(new Date(2027, 10, 1, 0, 0, 0, 50).getTime());
+  f.timers.delete(id);
+  timer.callback();
+  await settle();
+  assert.equal(f.dates.at(-1).getMonth(), 10);
+  assert.equal(f.dates.at(-1).getDate(), 1);
+  visible = false;
+  await f.clock.refresh();
+  assert.equal(f.timers.size, 0);
+  f.setTime(new Date(2027, 10, 3, 9).getTime());
+  visible = true;
+  await f.clock.refresh();
+  assert.equal(f.dates.at(-1).getDate(), 3);
+  assert.equal(f.timers.size, 1);
+  f.clock.dispose();
+});
+
+test("daily clock uses the next local midnight rather than a fixed 24 hours", async () => {
+  const saved = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  const f = fixture(() => true, "day");
+  try {
+    const before = new Date(2027, 10, 7, 0, 0, 0, 0);
+    f.setTime(before.getTime());
+    await f.clock.refresh();
+    assert.equal([...f.timers.values()][0].delay, 25 * 60 * 60 * 1000 + 50);
+  } finally {
+    f.clock.dispose();
+    if (saved === undefined) delete process.env.TZ;
+    else process.env.TZ = saved;
+  }
 });
